@@ -11,6 +11,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def get_default_novel_db_path() -> Path:
+    """小说业务数据库真源路径。"""
+    return Path(__file__).resolve().parents[1] / 'data' / 'novels.db'
+
+
 class NovelDatabase:
     """
     小说数据库管理类
@@ -19,8 +24,8 @@ class NovelDatabase:
     
     def __init__(self, db_path: str = None):
         if db_path is None:
-            # 默认使用 backend/data/novels.db
-            db_path = Path(__file__).parent.parent / 'data' / 'novels.db'
+            # 默认使用 backend/data/novels.db 作为唯一真源
+            db_path = get_default_novel_db_path()
         
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,6 +61,7 @@ class NovelDatabase:
                 chapter_num INTEGER NOT NULL,
                 title TEXT,
                 outline TEXT,
+                outline_summary TEXT,
                 content TEXT,
                 word_count INTEGER DEFAULT 0,
                 status TEXT DEFAULT 'draft',
@@ -67,6 +73,12 @@ class NovelDatabase:
                 UNIQUE(novel_id, chapter_num)
             )
         ''')
+
+        cursor.execute("PRAGMA table_info(chapters)")
+        chapter_columns = {row[1] for row in cursor.fetchall()}
+        if 'outline_summary' not in chapter_columns:
+            cursor.execute("ALTER TABLE chapters ADD COLUMN outline_summary TEXT")
+            logger.info("已为 chapters 表补充 outline_summary 列")
         
         # 创建人物表
         cursor.execute('''
@@ -122,11 +134,25 @@ class NovelDatabase:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _normalize_novel_row(self, row: sqlite3.Row | None) -> Optional[Dict[str, Any]]:
+        if not row:
+            return None
+        novel = dict(row)
+        settings = novel.get('settings')
+        if isinstance(settings, str):
+            try:
+                novel['settings'] = json.loads(settings) if settings else {}
+            except json.JSONDecodeError:
+                novel['settings'] = {}
+        elif settings is None:
+            novel['settings'] = {}
+        return novel
     
     # ========== 小说管理 ==========
     
     def create_novel(self, title: str, genre: str = 'fantasy', description: str = '', 
-                     author: str = 'AI Author') -> str:
+                     author: str = 'AI Author', settings: Optional[Dict[str, Any]] = None) -> str:
         """创建新小说"""
         import uuid
         novel_id = f"novel_{uuid.uuid4().hex[:8]}"
@@ -136,9 +162,9 @@ class NovelDatabase:
         
         try:
             cursor.execute('''
-                INSERT INTO novels (id, title, genre, description, author)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (novel_id, title, genre, description, author))
+                INSERT INTO novels (id, title, genre, description, author, settings)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (novel_id, title, genre, description, author, json.dumps(settings or {}, ensure_ascii=False)))
             
             conn.commit()
             logger.info(f"创建新小说：{novel_id} - {title}")
@@ -158,7 +184,7 @@ class NovelDatabase:
         try:
             cursor.execute('SELECT * FROM novels WHERE id = ?', (novel_id,))
             row = cursor.fetchone()
-            return dict(row) if row else None
+            return self._normalize_novel_row(row)
         except Exception as e:
             logger.error(f"获取小说失败：{e}")
             return None
@@ -173,7 +199,7 @@ class NovelDatabase:
         try:
             cursor.execute('SELECT * FROM novels ORDER BY updated_at DESC')
             rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+            return [self._normalize_novel_row(row) for row in rows]
         except Exception as e:
             logger.error(f"获取所有小说失败：{e}")
             return []
@@ -192,6 +218,8 @@ class NovelDatabase:
             
             for key, value in kwargs.items():
                 if key in ['title', 'genre', 'description', 'author', 'status', 'settings']:
+                    if key == 'settings' and isinstance(value, dict):
+                        value = json.dumps(value, ensure_ascii=False)
                     set_clauses.append(f"{key} = ?")
                     values.append(value)
             
@@ -240,16 +268,16 @@ class NovelDatabase:
     # ========== 章节管理 ==========
     
     def create_chapter(self, novel_id: str, chapter_num: int, title: str = '', 
-                       outline: str = '') -> int:
+                       outline: str = '', outline_summary: Optional[str] = None) -> int:
         """创建新章节"""
         conn = self._get_connection()
         cursor = conn.cursor()
         
         try:
             cursor.execute('''
-                INSERT INTO chapters (novel_id, chapter_num, title, outline, status)
-                VALUES (?, ?, ?, ?, 'draft')
-            ''', (novel_id, chapter_num, title, outline))
+                INSERT INTO chapters (novel_id, chapter_num, title, outline, outline_summary, status)
+                VALUES (?, ?, ?, ?, ?, 'draft')
+            ''', (novel_id, chapter_num, title, outline, outline_summary))
             
             conn.commit()
             chapter_id = cursor.lastrowid
@@ -303,7 +331,7 @@ class NovelDatabase:
     
     def update_chapter(self, novel_id: str, chapter_num: int, 
                        content: str = None, title: str = None,
-                       outline: str = None, status: str = None) -> bool:
+                       outline: str = None, outline_summary: str = None, status: str = None) -> bool:
         """更新章节内容"""
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -325,6 +353,9 @@ class NovelDatabase:
             if outline is not None:
                 updates.append("outline = ?")
                 values.append(outline)
+            if outline_summary is not None:
+                updates.append("outline_summary = ?")
+                values.append(outline_summary)
             
             if status is not None:
                 updates.append("status = ?")
@@ -394,10 +425,14 @@ class NovelDatabase:
                 DELETE FROM chapters 
                 WHERE novel_id = ? AND chapter_num = ?
             ''', (novel_id, chapter_num))
+
+            deleted = cursor.rowcount > 0
+            if deleted:
+                self._update_novel_stats_with_connection(conn, novel_id)
             
             conn.commit()
             logger.info(f"删除章节：{novel_id} 第{chapter_num}章")
-            return True
+            return deleted
         except Exception as e:
             logger.error(f"删除章节失败：{e}")
             conn.rollback()

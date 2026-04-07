@@ -90,6 +90,10 @@ class MemoryEngine:
     async def get_active_style(self) -> Dict[str, Any]:
         """获取当前激活的风格"""
         return await self.long_term.get_active_style()
+
+    async def apply_technique(self, technique_id: str, context: Dict[str, Any] | None = None) -> str:
+        """应用指定写作技巧，返回提示文本。"""
+        return await self.long_term.apply_technique(technique_id, context)
     
     async def close(self):
         """关闭记忆引擎"""
@@ -252,10 +256,16 @@ class LongTermMemory:
 
     def _init_files(self):
         """初始化文件"""
-        for file_path in [self.characters_file, self.styles_file, self.analyzed_works_file]:
+        default_payloads = {
+            self.characters_file: [],
+            self.analyzed_works_file: [],
+            self.styles_file: {"active_style": {}, "techniques": []},
+        }
+
+        for file_path, payload in default_payloads.items():
             if not file_path.exists():
                 with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump([], f, ensure_ascii=False, indent=2)
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
 
     def _get_vector_db(self):
         """获取向量数据库"""
@@ -313,6 +323,8 @@ class LongTermMemory:
     async def store_technique(self, technique_data: Dict):
         """存储写作技巧"""
         data = self._load_json(self.styles_file)
+        if not isinstance(data, dict):
+            data = {"active_style": {}, "techniques": []}
         if 'techniques' not in data:
             data['techniques'] = []
         data['techniques'].append(technique_data)
@@ -321,13 +333,32 @@ class LongTermMemory:
     async def get_active_style(self) -> Dict[str, Any]:
         """获取当前激活的风格"""
         data = self._load_json(self.styles_file)
+        if not isinstance(data, dict):
+            return {}
         return data.get('active_style', {})
 
     async def set_active_style(self, style_data: Dict):
         """设置当前激活的风格"""
         data = self._load_json(self.styles_file)
+        if not isinstance(data, dict):
+            data = {"active_style": {}, "techniques": []}
         data['active_style'] = style_data
         self._save_json(self.styles_file, data)
+
+    async def apply_technique(self, technique_id: str, context: Dict[str, Any] | None = None) -> str:
+        """根据技巧 ID 返回适用于当前上下文的提示。"""
+        data = self._load_json(self.styles_file)
+        if not isinstance(data, dict):
+            return ""
+
+        techniques = data.get('techniques', [])
+        context = context or {}
+        for technique in techniques:
+            if technique.get('id') == technique_id or technique.get('name') == technique_id:
+                description = technique.get('description', '')
+                scene_type = context.get('scene_type', '当前场景')
+                return f"请在{scene_type}中应用技巧【{technique.get('name', technique_id)}】：{description}".strip()
+        return ""
 
     async def semantic_search(self, query: str, collection_type: str = "all", top_k: int = 5) -> List[Dict]:
         """语义检索 - 使用向量数据库"""
