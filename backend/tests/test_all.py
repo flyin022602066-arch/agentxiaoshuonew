@@ -9,6 +9,8 @@ import sys
 import asyncio
 from pathlib import Path
 
+import pytest
+
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -172,6 +174,8 @@ async def test_async():
 
 # 运行异步测试
 asyncio.run(test_async())
+
+test_async = pytest.mark.asyncio(test_async)
 
 # ========== 测试结果汇总 ==========
 print("\n" + "=" * 70)

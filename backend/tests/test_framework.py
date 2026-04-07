@@ -9,8 +9,12 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent / "backend"))
+
+pytestmark = pytest.mark.asyncio
 
 
 async def test_config():
