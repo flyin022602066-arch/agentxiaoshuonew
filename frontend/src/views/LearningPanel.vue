@@ -254,8 +254,8 @@ onMounted(() => {
 
 <style scoped>
 .learning-panel {
-  max-width: 1400px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
 }
 
 .card-header {
