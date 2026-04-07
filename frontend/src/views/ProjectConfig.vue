@@ -11,15 +11,32 @@
         </div>
       </template>
       
+      <!-- 快速切换模型 -->
+      <el-alert type="info" :closable="false" style="margin-bottom: 20px">
+        <template #title>🔄 快速切换模型</template>
+        <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+          <el-select v-model="quickSwitchModel" placeholder="选择已保存的模型" style="width: 250px" @change="handleQuickSwitch">
+            <el-option
+              v-for="p in savedProviders"
+              :key="p.name"
+              :label="`${p.name} (${p.model || '未设置模型'})`"
+              :value="p.name"
+            />
+          </el-select>
+          <el-tag v-if="config.default_provider" type="success">当前默认：{{ config.default_provider }}</el-tag>
+          <span style="color: #909399; font-size: 13px;">选择后点击"保存配置"生效</span>
+        </div>
+      </el-alert>
+
       <!-- 默认提供商 -->
       <el-form :model="config" label-width="120px">
         <el-form-item label="默认提供商">
-          <el-select v-model="config.default_provider" placeholder="选择默认提供商">
+          <el-select v-model="config.default_provider" placeholder="选择默认提供商" filterable allow-create default-first-option>
             <el-option
-              v-for="provider in providers"
-              :key="provider.name"
-              :label="provider.name"
-              :value="provider.name"
+              v-for="name in Object.keys(config.providers)"
+              :key="name"
+              :label="name"
+              :value="name"
             />
           </el-select>
         </el-form-item>
@@ -31,7 +48,6 @@
           <el-form-item label="API 格式">
             <el-select v-model="provider.api_format">
               <el-option label="OpenAI 兼容" value="openai" />
-              <el-option label="阿里云" value="aliyun" />
               <el-option label="自定义" value="custom" />
             </el-select>
           </el-form-item>
@@ -53,7 +69,7 @@
           </el-form-item>
 
           <el-form-item v-if="provider.has_api_key">
-            <el-checkbox v-model="provider.clear_api_key">清除已保存的 API Key</el-checkbox>
+            <el-checkbox v-model="provider.clear_api_key"><span>清除已保存的 API Key</span></el-checkbox>
           </el-form-item>
           
           <el-form-item label="Base URL">
@@ -62,10 +78,6 @@
           
           <el-form-item label="模型名称">
             <el-input v-model="provider.model" placeholder="模型名称" />
-          </el-form-item>
-          
-          <el-form-item label="超时时间">
-            <el-input-number v-model="provider.timeout" :min="1" :max="600" /> 秒
           </el-form-item>
           
           <el-form-item>
@@ -142,44 +154,8 @@ const apiStatus = ref('检查中...')
 const lastUpdated = ref('')
 
 const config = reactive({
-  default_provider: 'eggfans',  // 默认使用 eggfans
-  providers: {
-    eggfans: {
-      api_format: 'openai',
-      api_key: '',
-      has_api_key: false,
-      masked_api_key: '',
-      clear_api_key: false,
-      base_url: 'https://eggfans.com',
-      endpoint: '/v1/chat/completions',
-      model: 'deepseek-v3.2',
-      timeout: 60,
-      enabled: true,
-      auth_type: 'bearer'
-    },
-    volcengine: {
-      api_format: 'openai',
-      api_key: '',
-      has_api_key: false,
-      masked_api_key: '',
-      clear_api_key: false,
-      base_url: 'https://ark.cn-beijing.volces.com/api/v3',
-      model: '',
-      timeout: 60,
-      enabled: true
-    },
-    aliyun: {
-      api_format: 'aliyun',
-      api_key: '',
-      has_api_key: false,
-      masked_api_key: '',
-      clear_api_key: false,
-      base_url: 'https://dashscope.aliyuncs.com/api/v1',
-      model: '',
-      timeout: 60,
-      enabled: true
-    }
-  }
+  default_provider: '',
+  providers: {}
 })
 
 const projectSettings = reactive({
@@ -190,12 +166,10 @@ const projectSettings = reactive({
 })
 
 const testResults = ref({})
+const quickSwitchModel = ref('')
 
-const providers = [
-  { name: 'volcengine', label: '火山引擎' },
-  { name: 'aliyun', label: '阿里云' },
-  { name: 'eggfans', label: 'EggFans' }
-]
+// 从后端加载的提供商列表（用于快速切换）
+const savedProviders = ref([])
 
 const loadConfig = async () => {
   try {
@@ -205,44 +179,57 @@ const loadConfig = async () => {
     if (result.data) {
       const configData = result.data
       
-      // 优先从 providers 中获取 default_provider
+      // 清空现有提供商，完全从后端加载
+      config.providers = {}
+      
+      // 获取默认提供商
       if (configData.default_provider) {
         config.default_provider = configData.default_provider
-        console.log('设置默认提供商 (从 default_provider):', config.default_provider)
+        quickSwitchModel.value = configData.default_provider
+        console.log('设置默认提供商:', config.default_provider)
       }
       
-      // 从 providers 中获取提供商配置（后端返回的是 providers 字段）
+      // 加载所有提供商配置
       if (configData.providers) {
         console.log('加载提供商配置:', Object.keys(configData.providers))
         
-        // 合并提供商配置
         Object.keys(configData.providers).forEach(key => {
           const providerData = configData.providers[key]
-          if (config.providers[key]) {
-            // 保留现有配置结构，只更新提供的字段
-            Object.assign(config.providers[key], providerData)
-            config.providers[key].clear_api_key = false
-            console.log(`更新提供商 ${key}:`, {
-              api_key: providerData.masked_api_key || '空',
-              base_url: providerData.base_url,
-              model: providerData.model
-            })
-          } else {
-            config.providers[key] = {
-              ...providerData,
-              clear_api_key: false,
-              api_key: ''
-            }
-            console.log(`新增提供商 ${key}:`, config.providers[key])
+          config.providers[key] = {
+            api_format: providerData.api_format || 'openai',
+            api_key: '',
+            has_api_key: providerData.has_api_key || false,
+            masked_api_key: providerData.masked_api_key || '',
+            clear_api_key: false,
+            base_url: providerData.base_url || '',
+            endpoint: providerData.endpoint || '/v1/chat/completions',
+            model: providerData.model || '',
+            enabled: providerData.enabled !== undefined ? providerData.enabled : true,
+            auth_type: providerData.auth_type || 'bearer'
           }
+          console.log(`加载提供商 ${key}:`, config.providers[key])
         })
+        
+        // 更新快速切换列表
+        savedProviders.value = Object.keys(configData.providers).map(key => ({
+          name: key,
+          model: configData.providers[key].model || '',
+          base_url: configData.providers[key].base_url || ''
+        }))
       }
       
-      ElMessage.success(`配置已加载，默认提供商：${config.default_provider}`)
+      ElMessage.success(`配置已加载，默认提供商：${config.default_provider || '未设置'}`)
     }
   } catch (error) {
     console.error('加载配置失败:', error)
-    ElMessage.warning('加载配置失败，将使用默认配置 (eggfans)')
+    ElMessage.warning('加载配置失败，将使用空配置')
+  }
+}
+
+const handleQuickSwitch = (modelName) => {
+  if (modelName && config.providers[modelName]) {
+    config.default_provider = modelName
+    ElMessage.info(`已选择 ${modelName} 为默认提供商，请点击"保存配置"生效`)
   }
 }
 
@@ -260,18 +247,17 @@ const saveConfig = async () => {
       const provider = config.providers[key]
       configToSave.providers[key] = {
         api_format: provider.api_format,
-        api_key: provider.api_key,
-        has_api_key: provider.has_api_key,
-        masked_api_key: provider.masked_api_key,
+        api_key: provider.api_key || '',
+        has_api_key: provider.has_api_key || false,
+        masked_api_key: provider.masked_api_key || '',
         clear_api_key: provider.clear_api_key === true,
         base_url: provider.base_url,
         model: provider.model,
-        timeout: provider.timeout,
         enabled: provider.enabled !== undefined ? provider.enabled : true
       }
     })
     
-    console.log('保存配置:', configToSave)
+    console.log('保存配置:', JSON.stringify(configToSave, null, 2))
     
     // 保存到后端
     await apiClient.config.update(configToSave)
@@ -280,7 +266,8 @@ const saveConfig = async () => {
     lastUpdated.value = new Date().toLocaleString()
   } catch (error) {
     console.error('保存配置失败:', error)
-    ElMessage.error('配置保存失败：' + error.message)
+    const errorMsg = error.response?.data?.error?.message || error.message || '未知错误'
+    ElMessage.error('配置保存失败：' + errorMsg)
   } finally {
     saving.value = false
   }
@@ -313,7 +300,6 @@ const addProvider = () => {
     clear_api_key: false,
     base_url: '',
     model: '',
-    timeout: 60,
     enabled: true
   }
 }
@@ -335,8 +321,8 @@ onMounted(() => {
 
 <style scoped>
 .project-config {
-  max-width: 1200px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
 }
 
 .config-section {
