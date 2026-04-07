@@ -352,8 +352,8 @@ onMounted(() => {
 
 <style scoped>
 .school-registry {
-  max-width: 1600px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
 }
 
 .card-header {
