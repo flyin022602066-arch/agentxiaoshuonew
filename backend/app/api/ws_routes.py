@@ -99,8 +99,8 @@ async def websocket_endpoint(
                 task_id = msg_data.get('task_id')
                 if task_id:
                     from app.tasks.task_manager import get_task_manager
-                    manager = get_task_manager()
-                    task = manager.get_task(task_id)
+                    task_manager = get_task_manager()
+                    task = task_manager.get_task(task_id)
                     if task:
                         await websocket.send_json({
                             "type": "task_status",
