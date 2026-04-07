@@ -247,7 +247,7 @@ class CharacterAgent(BaseAgent):
             
             # 生成关系 ID
             for rel in relationships:
-                rel['relationship_id'] = f"rel_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(relations hips)}"
+                rel['relationship_id'] = f"rel_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(relationships)}"
             
             return {
                 "status": "success",

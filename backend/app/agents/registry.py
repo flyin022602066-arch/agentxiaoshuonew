@@ -119,6 +119,15 @@ def get_all_agents() -> Dict[str, BaseAgent]:
     return registry.get_all()
 
 
+def set_agent_state(agent_id: str, state: str):
+    """设置 Agent 状态"""
+    agent = registry.get(agent_id)
+    if agent:
+        agent.state = state
+        from datetime import datetime
+        agent.last_active = datetime.now()
+
+
 def get_agent_status() -> Dict[str, Dict[str, Any]]:
     """获取所有 Agent 状态"""
     return registry.get_status()

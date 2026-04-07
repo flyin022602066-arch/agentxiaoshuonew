@@ -1,8 +1,9 @@
-# Agent 模块
+# ==========================================
+# 多 Agent 协作小说系统 - Agent 基类
+# ==========================================
+
 from typing import Dict, Any, Optional
 from datetime import datetime
-
-__all__ = ["BaseAgent"]
 
 
 class BaseAgent:
@@ -41,6 +42,7 @@ class BaseAgent:
         getattr(logger, level)(f"[{self.agent_id}] {message}")
 
     async def call_llm(self, prompt: str, **kwargs) -> str:
+        """统一的 LLM 调用入口。"""
         if not self.llm_client:
             raise RuntimeError(f"{self.agent_id} 未配置 llm_client")
         return await self.llm_client.generate(prompt, self.get_system_prompt(), **kwargs)
