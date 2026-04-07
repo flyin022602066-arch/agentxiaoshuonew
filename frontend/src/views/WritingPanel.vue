@@ -31,6 +31,21 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <el-alert
+      v-if="selectedNovelId && !blueprintSummary.length"
+      title="当前小说没有全自动创作上下文"
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin-top: 20px"
+    >
+      <p>这本小说当前未保存世界观地图、宏观规划、人物体系、伏笔网络，所以不会走我测试成功时那条“全自动上下文续写”路线。</p>
+      <p>如果你想要和测试一致的创作效果，请从“全自动创作”页新建小说，再进入写作面板续写。</p>
+      <div style="margin-top: 10px;">
+        <el-button type="primary" size="small" @click="$router.push('/auto')">去全自动创作</el-button>
+      </div>
+    </el-alert>
     
     <!-- AI 创作工具 -->
     <el-card class="ai-tools-card" v-if="selectedNovelId">
@@ -38,10 +53,12 @@
         <div class="card-header">
           <span>🤖 AI 创作工具</span>
           <div>
-            <el-button type="success" size="small" @click="showAiOutlineGen">生成大纲</el-button>
-            <el-button type="success" size="small" @click="showAiCharactersGen">生成人物</el-button>
-            <el-button type="success" size="small" @click="showAiChapterOutline">生成章节大纲</el-button>
-            <el-button type="success" size="small" @click="showAiPlotDesign">生成情节</el-button>
+            <el-button type="primary" size="small" @click="startWriting" :loading="writing">
+              {{ writing ? '创作中...' : 'AI 创作本章' }}
+            </el-button>
+            <el-button type="success" size="small" @click="continueWriting" :loading="writing">
+              {{ writing ? '创作中...' : '续写下一章' }}
+            </el-button>
           </div>
         </div>
       </template>
@@ -51,15 +68,27 @@
         :closable="false"
         show-icon
       >
-        <p>所有创作内容都由 AI 生成，你只需要：</p>
-        <ul>
-          <li>点击"生成大纲" → AI 为你生成小说整体大纲</li>
-          <li>点击"生成人物" → AI 为你设计所有角色</li>
-          <li>点击"生成章节大纲" → AI 为当前章节生成详细大纲</li>
-          <li>点击"生成情节" → AI 设计本章情节发展</li>
-          <li>最后点击"AI 创作" → AI 撰写完整章节正文</li>
-        </ul>
+        <p>点击"AI 创作本章"根据大纲生成当前章节正文</p>
+        <p>点击"续写下一章"会自动创建新章节、生成大纲并直接开始 AI 创作</p>
+        <p>创作过程在后台运行，可关闭弹窗后在日志中查看进度</p>
       </el-alert>
+    </el-card>
+
+    <el-card v-if="selectedNovelId && blueprintSummary.length" class="blueprint-card" style="margin-top: 20px">
+      <template #header>
+        <div class="card-header">
+          <span>🧭 全自动创作上下文</span>
+          <el-tag type="success" size="small">续写会自动参考这些设定</el-tag>
+        </div>
+      </template>
+      <el-row :gutter="12">
+        <el-col :span="12" v-for="item in blueprintSummary" :key="item.title">
+          <el-card shadow="never" class="blueprint-summary-card">
+            <div class="blueprint-summary-title">{{ item.title }}</div>
+            <div class="blueprint-summary-content">{{ item.content }}</div>
+          </el-card>
+        </el-col>
+      </el-row>
     </el-card>
     
     <el-row :gutter="20" v-if="selectedNovelId">
@@ -68,8 +97,8 @@
         <el-card class="chapters-card">
           <template #header>
             <div class="card-header">
-              <span>章节列表</span>
-              <el-button type="primary" size="small" @click="createNewChapter">新建</el-button>
+              <span>📚 章节列表</span>
+              <el-button type="primary" size="small" @click="createNewChapter">+ 新建</el-button>
             </div>
           </template>
           
@@ -78,35 +107,45 @@
             placeholder="搜索章节..."
             size="small"
             clearable
-            style="margin-bottom: 10px"
+            prefix-icon="Search"
+            style="margin-bottom: 12px"
           />
           
-          <el-menu
-            :default-active="String(currentChapterNum)"
-            @select="handleChapterSelect"
-          >
-            <el-menu-item
+          <div class="chapters-list">
+            <div
               v-for="chapter in filteredChapters"
               :key="chapter.num"
-              :index="String(chapter.num)"
+              class="chapter-card"
+              :class="{ 'chapter-active': currentChapterNum === chapter.num }"
+              @click="handleChapterSelect(String(chapter.num))"
             >
-              <el-tag 
-                size="small" 
-                :type="chapter.status === 'published' ? 'success' : 'warning'"
-                style="margin-right: 8px"
-              >
-                {{ chapter.status === 'published' ? '已发布' : '草稿' }}
-              </el-tag>
-              <span>第{{ chapter.num }}章</span>
-              <div class="chapter-title">{{ chapter.title }}</div>
-              <div class="chapter-meta">
-                <span>{{ chapter.wordCount }}字</span>
-                <span v-if="chapter.updatedAt">{{ formatDate(chapter.updatedAt) }}</span>
+              <div class="chapter-header">
+                <span class="chapter-num">第{{ chapter.num }}章</span>
+                <el-tag 
+                  size="small" 
+                  :type="chapter.status === 'published' ? 'success' : 'warning'"
+                >
+                  {{ chapter.status === 'published' ? '已发布' : '草稿' }}
+                </el-tag>
               </div>
-            </el-menu-item>
-          </el-menu>
+              <div class="chapter-title-text">{{ chapter.title || '未命名' }}</div>
+              <div class="chapter-footer">
+                <span class="chapter-words">{{ chapter.wordCount?.toLocaleString() || 0 }} 字</span>
+                <span v-if="chapter.updatedAt" class="chapter-date">{{ formatDate(chapter.updatedAt) }}</span>
+              </div>
+              <el-button
+                text
+                type="danger"
+                size="small"
+                class="chapter-delete-btn"
+                @click.stop="deleteChapter(chapter)"
+              >
+                删除
+              </el-button>
+            </div>
+          </div>
           
-          <el-empty v-if="filteredChapters.length === 0" description="暂无章节" />
+          <el-empty v-if="filteredChapters.length === 0" description="暂无章节，点击新建创建第一章" />
         </el-card>
         
         <!-- 统计信息 -->
@@ -218,20 +257,80 @@
             </el-row>
             
             <el-form-item label="写作风格">
-              <el-select v-model="selectedStyle" placeholder="选择风格" style="width: 100%" @change="showStylePreview">
-                <el-option label="默认风格" value="default" />
-                <el-option
-                  v-for="style in availableStyles"
-                  :key="style.id"
-                  :label="style.name"
-                  :value="style.id"
-                />
+              <el-select v-model="selectedStyle" filterable placeholder="搜索或选择风格" style="width: 100%" @change="showStylePreview">
+                <el-option-group
+                  v-for="(styles, groupName) in groupedStyleOptions"
+                  :key="groupName"
+                  :label="groupName"
+                >
+                  <el-option
+                    v-for="style in styles"
+                    :key="style.id"
+                    :label="style.name"
+                    :value="style.id"
+                  />
+                </el-option-group>
               </el-select>
               <div v-if="stylePreview" class="style-preview">
                 <el-alert :title="stylePreview.name" type="info" :closable="false" show-icon>
                   <p>{{ stylePreview.description }}</p>
                   <p><strong>特点：</strong>{{ stylePreview.features.join('、') }}</p>
+                  <p v-if="stylePreview.forbidden?.length"><strong>避免：</strong>{{ stylePreview.forbidden.join('、') }}</p>
+                  <p v-if="stylePreview.toneExample"><strong>示例：</strong>“{{ stylePreview.toneExample }}”</p>
                 </el-alert>
+                <div style="margin-top: 8px;">
+                  <el-select
+                    v-model="compareStyleIds"
+                    multiple
+                    collapse-tags
+                    collapse-tags-tooltip
+                    :multiple-limit="4"
+                    placeholder="选择 2-4 个风格做对比"
+                    style="width: 100%"
+                  >
+                    <el-option-group
+                      v-for="(styles, groupName) in groupedStyleOptions"
+                      :key="`compare-${groupName}`"
+                      :label="groupName"
+                    >
+                      <el-option
+                        v-for="style in styles"
+                        :key="style.id"
+                        :label="style.name"
+                        :value="style.id"
+                      />
+                    </el-option-group>
+                  </el-select>
+                </div>
+              </div>
+            </el-form-item>
+
+            <el-form-item label="风格强度">
+              <el-radio-group v-model="selectedStyleStrength" size="small">
+                <el-radio-button label="light">轻度</el-radio-button>
+                <el-radio-button label="medium">中度</el-radio-button>
+                <el-radio-button label="strong">强烈</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+
+            <el-form-item label="常用组合">
+              <div style="width: 100%;">
+                <div style="margin-bottom: 8px;">
+                  <el-button size="small" @click="saveCurrentStylePreset">保存当前组合</el-button>
+                </div>
+                <div v-if="stylePresets.length">
+                  <el-tag
+                    v-for="preset in stylePresets"
+                    :key="preset.id"
+                    closable
+                    @click="applyStylePreset(preset)"
+                    @close="removeStylePreset(preset.id)"
+                    style="margin: 0 8px 8px 0; cursor: pointer;"
+                  >
+                    {{ preset.name }}
+                  </el-tag>
+                </div>
+                <el-text v-else type="info">还没有保存的风格组合</el-text>
               </div>
             </el-form-item>
             
@@ -242,7 +341,7 @@
                   :key="tech.id" 
                   :label="tech.id"
                 >
-                  {{ tech.name }}
+                  <span>{{ tech.name }}</span>
                 </el-checkbox>
               </el-checkbox-group>
             </el-form-item>
@@ -325,18 +424,26 @@
     <el-empty v-else description="请先选择要创作的小说" :image-size="200" />
     
     <!-- 创作进度对话框 -->
-    <el-dialog v-model="progressVisible" title="AI 创作中" width="600px" :close-on-click-modal="false">
+    <el-dialog v-model="progressVisible" title="AI 创作中" width="600px" :close-on-click-modal="true" :close-on-press-escape="true" @close="handleProgressClose">
       <el-progress :percentage="progress" :status="progressStatus" />
       <p style="text-align: center; margin-top: 10px">{{ currentStage }}</p>
+      <p style="text-align: center; color: #606266; font-size: 13px; margin-top: 6px">
+        {{ getWritingStageHint(currentStage) }}
+      </p>
+      <p style="text-align: center; color: #909399; font-size: 12px; margin-top: 5px">
+        任务在后台运行，关闭弹窗后仍会继续创作
+      </p>
+      <p v-if="latestTaskId" style="text-align: center; color: #909399; font-size: 12px; margin-top: 4px">
+        任务编号：{{ latestTaskId }}
+      </p>
       
       <el-steps direction="vertical" :active="currentStep" style="margin-top: 20px">
-        <el-step title="剧情架构师" description="细化大纲" />
-        <el-step title="人物设计师" description="准备角色" />
-        <el-step title="章节写手" description="撰写初稿" />
-        <el-step title="对话专家" description="打磨对话" />
-        <el-step title="审核编辑" description="一致性检查" />
-        <el-step title="主编" description="最终审核" />
+        <el-step title="AI 正在创作" :description="currentStage" />
       </el-steps>
+
+      <template #footer>
+        <el-button @click="progressVisible = false">关闭弹窗（后台继续）</el-button>
+      </template>
     </el-dialog>
     
     <!-- 版本历史对话框 -->
@@ -357,6 +464,78 @@
           </el-card>
         </el-timeline-item>
       </el-timeline>
+    </el-dialog>
+
+    <el-dialog v-model="exportDialogVisible" title="导出平台版本" width="860px">
+      <div class="export-dialog-body">
+        <el-alert
+          title="选择要导出的平台版本"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px"
+        >
+          <p>可以选择导出番茄版、七猫版，或同时导出双平台版本。</p>
+        </el-alert>
+
+        <el-radio-group v-model="exportTarget" size="large" class="export-target-group">
+          <el-radio-button label="fanqiao">番茄版</el-radio-button>
+          <el-radio-button label="qimao">七猫版</el-radio-button>
+          <el-radio-button label="both">双平台</el-radio-button>
+        </el-radio-group>
+
+        <div class="export-meta" v-if="currentChapterNum">
+          <el-tag type="info">第{{ currentChapterNum }}章</el-tag>
+          <el-tag type="success" v-if="selectedNovelId">小说已选定</el-tag>
+        </div>
+
+        <div v-if="exportLoading" class="export-loading-state">
+          <el-skeleton :rows="6" animated />
+        </div>
+
+        <el-empty
+          v-else-if="!exportResults.length && !exportError"
+          description="选择平台后点击“开始导出”，结果会显示在这里"
+          :image-size="120"
+        />
+
+        <el-alert
+          v-if="exportError"
+          :title="exportError"
+          type="error"
+          :closable="false"
+          show-icon
+          style="margin-top: 16px"
+        />
+
+        <div v-if="exportResults.length" class="export-result-list">
+          <el-card v-for="variant in exportResults" :key="variant.platform" class="export-result-card" shadow="never">
+            <template #header>
+              <div class="export-result-header">
+                <div>
+                  <span class="export-platform-title">{{ getExportPlatformLabel(variant.platform) }}</span>
+                  <el-tag size="small" type="warning" style="margin-left: 8px">{{ variant.platform }}</el-tag>
+                </div>
+                <el-text type="info">{{ variant.title || chapterTitle || `第${currentChapterNum}章` }}</el-text>
+              </div>
+            </template>
+            <el-input
+              :model-value="variant.content"
+              type="textarea"
+              :rows="10"
+              readonly
+              resize="vertical"
+            />
+          </el-card>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="exportDialogVisible = false">关闭</el-button>
+        <el-button type="primary" :loading="exportLoading" :disabled="!canExportCurrentChapter" @click="confirmExportChapter">
+          {{ exportLoading ? '导出中...' : '开始导出' }}
+        </el-button>
+      </template>
     </el-dialog>
     
     <!-- 新建小说对话框 -->
@@ -460,6 +639,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import { apiClient } from '@/api/client'
+import { authorStyles, authorStyleMap, authorStyleGroups } from '@/constants/authorStyles'
 
 // ========== 小说管理 ==========
 const selectedNovelId = ref('')
@@ -492,6 +672,22 @@ const wordCountTarget = ref(3000)
 const selectedStyle = ref('default')
 const selectedTechniques = ref([])
 const stylePreview = ref(null)
+const novelSettingsCache = ref(null)
+const stylePreviewText = ref('')
+const previewLoading = ref(false)
+// 风格相关的本地状态（需要的引用/常量）
+const STYLE_PRESETS_KEY = 'writing_panel_style_presets'
+const stylePresets = ref([])
+const groupedStyleOptions = computed(() => authorStyleGroups ?? {})
+const selectedStyleStrength = ref('medium')
+const compareStyleIds = ref([])
+
+const buildCreativeSettingsPayload = () => ({
+  style_id: selectedStyle.value,
+  strength: selectedStyleStrength.value,
+  techniques: [...selectedTechniques.value],
+  updated_at: new Date().toISOString()
+})
 
 // ========== 状态显示 ==========
 const agentStatus = ref([])
@@ -510,17 +706,26 @@ const selectedCharactersForAdd = ref([])
 
 // ========== 创作流程 ==========
 const writing = ref(false)
+const creatingNextChapter = ref(false)
 const progressVisible = ref(false)
 const progress = ref(0)
 const progressStatus = ref(null)
 const currentStage = ref('')
 const currentStep = ref(0)
+const latestTaskId = ref('')
 const logs = ref([])
 const autoScroll = ref(true)
 
 // ========== 版本管理 ==========
 const versionVisible = ref(false)
 const versions = ref([])
+
+// ========== 导出 ==========
+const exportDialogVisible = ref(false)
+const exportTarget = ref('both')
+const exportLoading = ref(false)
+const exportResults = ref([])
+const exportError = ref('')
 
 // ========== 计算属性 ==========
 const filteredChapters = computed(() => {
@@ -533,6 +738,7 @@ const filteredChapters = computed(() => {
 })
 
 const currentWordCount = computed(() => chapterContent.value.length)
+const canExportCurrentChapter = computed(() => Boolean(selectedNovelId.value && currentChapterNum.value))
 
 const totalChapters = computed(() => chapters.value.length)
 
@@ -548,15 +754,80 @@ const draftChapters = computed(() =>
   chapters.value.filter(ch => ch.status === 'draft').length
 )
 
+const normalizeTaskStage = (text = '') => {
+  return String(text)
+    .replace(/\uFFFD/g, '')
+    .replace(/Step\s*(\d)\/6/g, '阶段 $1/6')
+    .trim()
+}
+
+const getWritingStageHint = (stage = '') => {
+  const text = normalizeTaskStage(stage)
+  if (text.includes('细化大纲')) return '正在细化本章剧情推进与冲突重点…'
+  if (text.includes('准备角色')) return '正在整理本章出场人物与关系张力…'
+  if (text.includes('撰写初稿')) return '正在写出章节正文初稿…'
+  if (text.includes('打磨对话')) return '正在润色对话与潜台词表达…'
+  if (text.includes('一致性')) return '正在检查世界观、人物和前后文一致性…'
+  if (text.includes('最终审核')) return '正在做最终校订与收束…'
+  if (text.includes('完成')) return '章节已完成，准备刷新写作面板。'
+  return text || 'AI 正在处理中…'
+}
+
+const blueprintSummary = computed(() => {
+  const settings = novelSettingsCache.value?.settings || {}
+  const blueprint = settings.blueprint || {}
+  const worldMap = settings.world_map || blueprint.world_map || {}
+  const macroPlot = settings.macro_plot || blueprint.macro_plot || {}
+  const characterSystem = settings.character_system || blueprint.character_system || {}
+  const hookNetwork = settings.hook_network || blueprint.hook_network || {}
+
+  const result = []
+
+  if (Object.keys(worldMap).length) {
+    result.push({
+      title: '世界观地图',
+      content: worldMap.background || worldMap.world_name || JSON.stringify(worldMap).slice(0, 180)
+    })
+  }
+
+  if (Object.keys(macroPlot).length) {
+    const firstVolume = macroPlot.volumes?.[0]
+    result.push({
+      title: '宏观规划',
+      content: firstVolume
+        ? `${firstVolume.volume_title || '第一卷'}：${firstVolume.main_goal || ''}`
+        : JSON.stringify(macroPlot).slice(0, 180)
+    })
+  }
+
+  if (Object.keys(characterSystem).length) {
+    const protagonist = characterSystem.protagonist
+    result.push({
+      title: '人物体系',
+      content: protagonist
+        ? `${protagonist.name || '主角'}｜目标：${protagonist.goal || '未设定'}｜性格：${(protagonist.personality || []).join('、')}`
+        : JSON.stringify(characterSystem).slice(0, 180)
+    })
+  }
+
+  if (Object.keys(hookNetwork).length) {
+    const firstHook = Object.values(hookNetwork).flat().find(Boolean)
+    result.push({
+      title: '伏笔网络',
+      content: firstHook?.description || JSON.stringify(hookNetwork).slice(0, 180)
+    })
+  }
+
+  return result
+})
+
 const renderedContent = computed(() => {
   return marked(chapterContent.value || '')
 })
 
-const availableStyles = ref([
-  { id: 'wuxia_jinyong', name: '金庸派' },
-  { id: 'wuxia_gulong', name: '古龙派' },
-  { id: 'romance_qiongyao', name: '琼瑶派' }
-])
+const availableStyles = ref(authorStyles)
+
+const defaultAutoStyle = authorStyleMap.default
 
 const availableTechniques = ref([
   { id: 'multi_thread', name: '多线交织' },
@@ -591,6 +862,88 @@ const loadNovels = async () => {
     console.error('加载小说列表失败:', error)
     ElMessage.error('加载小说列表失败：' + error.message)
   }
+}
+
+const loadStylePresets = () => {
+  try {
+    const saved = localStorage.getItem(STYLE_PRESETS_KEY)
+    stylePresets.value = saved ? JSON.parse(saved) : []
+  } catch (error) {
+    console.error('加载风格预设失败:', error)
+    stylePresets.value = []
+  }
+}
+
+const persistStylePresets = () => {
+  localStorage.setItem(STYLE_PRESETS_KEY, JSON.stringify(stylePresets.value))
+}
+
+const syncStylePresetsToNovel = async () => {
+  if (!selectedNovelId.value) return
+
+  try {
+    const baseSettings = novelSettingsCache.value?.settings || {}
+    await apiClient.novels.update(selectedNovelId.value, {
+      settings: {
+        ...baseSettings,
+        style_presets: stylePresets.value
+      }
+    })
+
+    if (novelSettingsCache.value) {
+      novelSettingsCache.value = {
+        ...novelSettingsCache.value,
+        settings: {
+          ...baseSettings,
+          style_presets: stylePresets.value
+        }
+      }
+    }
+  } catch (error) {
+    console.error('同步小说风格预设失败:', error)
+  }
+}
+
+const saveCurrentStylePreset = async () => {
+  const style = availableStyles.value.find(item => item.id === selectedStyle.value)
+  try {
+    const { value } = await ElMessageBox.prompt('输入预设名称', '保存常用风格组合', {
+      inputValue: `${style?.name || selectedStyle.value}-${selectedStyleStrength.value}`,
+      confirmButtonText: '保存',
+      cancelButtonText: '取消'
+    })
+    stylePresets.value = [
+      {
+        id: `preset_${Date.now()}`,
+        name: value,
+        styleId: selectedStyle.value,
+        strength: selectedStyleStrength.value
+      },
+      ...stylePresets.value.filter(item => item.name !== value)
+    ].slice(0, 12)
+    persistStylePresets()
+    await syncStylePresetsToNovel()
+    ElMessage.success('风格组合已保存')
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error('保存风格组合失败')
+  }
+}
+
+const applyStylePreset = (preset) => {
+  selectedStyle.value = preset.styleId
+  selectedStyleStrength.value = preset.strength || 'medium'
+  if (!compareStyleIds.value.includes(preset.styleId)) {
+    compareStyleIds.value = [preset.styleId, ...compareStyleIds.value].slice(0, 4)
+  }
+  showStylePreview()
+  syncNovelActiveStyle()
+  ElMessage.success(`已应用预设：${preset.name}`)
+}
+
+const removeStylePreset = (presetId) => {
+  stylePresets.value = stylePresets.value.filter(item => item.id !== presetId)
+  persistStylePresets()
+  syncStylePresetsToNovel()
 }
 
 const createNewNovel = () => {
@@ -671,13 +1024,60 @@ const loadNovelData = async () => {
   if (!selectedNovelId.value) return
   
   addLog(`加载小说：${selectedNovelId.value}`)
+  await loadNovelSettings()
   await loadChapters()
   await loadCharacters()
   await loadHooks()
   await loadNovelStats()
+
+   if (chapters.value.length > 0 && !chapters.value.some(ch => ch.num === currentChapterNum.value)) {
+     currentChapterNum.value = chapters.value[0].num
+   }
+
+   if (chapters.value.length > 0 && !chapterContent.value) {
+     await handleChapterSelect(String(currentChapterNum.value || chapters.value[0].num))
+   }
   
   // 保存到 localStorage
   saveCurrentState()
+}
+
+const loadNovelSettings = async () => {
+  try {
+    const result = await apiClient.novels.get(selectedNovelId.value)
+    if (result.data) {
+      novelSettingsCache.value = result.data
+      const creativeSettings = result.data.settings?.creative_settings
+      const novelPresetList = result.data.settings?.style_presets
+      if (Array.isArray(novelPresetList) && novelPresetList.length > 0) {
+        stylePresets.value = novelPresetList
+        persistStylePresets()
+        const defaultPreset = novelPresetList.find(item => item.isDefault)
+        if (defaultPreset) {
+          applyStylePreset(defaultPreset)
+        }
+      }
+      const activeStyle = result.data.settings?.active_style
+      if (creativeSettings?.style_id) {
+        selectedStyle.value = creativeSettings.style_id
+        selectedStyleStrength.value = creativeSettings.strength || 'medium'
+        selectedTechniques.value = Array.isArray(creativeSettings.techniques) ? creativeSettings.techniques : []
+      } else if (activeStyle?.style_id) {
+        selectedStyle.value = activeStyle.style_id
+        selectedStyleStrength.value = activeStyle.strength || 'medium'
+        selectedTechniques.value = []
+        stylePreview.value = {
+          name: activeStyle.name || defaultAutoStyle.name,
+          description: activeStyle.description || defaultAutoStyle.description,
+          features: activeStyle.features || defaultAutoStyle.features,
+          forbidden: activeStyle.forbidden || defaultAutoStyle.forbidden || [],
+          toneExample: activeStyle.tone_example || activeStyle.toneExample || defaultAutoStyle.toneExample
+        }
+      }
+    }
+  } catch (error) {
+    console.error('加载小说设置失败:', error)
+  }
 }
 
 const saveCurrentState = () => {
@@ -689,6 +1089,8 @@ const saveCurrentState = () => {
     chapterContent: chapterContent.value,
     wordCountTarget: wordCountTarget.value,
     selectedStyle: selectedStyle.value,
+    selectedStyleStrength: selectedStyleStrength.value,
+    selectedTechniques: [...selectedTechniques.value],
     timestamp: Date.now()
   }
   localStorage.setItem('writing_panel_state', JSON.stringify(state))
@@ -708,10 +1110,21 @@ const restoreState = () => {
         chapterContent.value = state.chapterContent || ''
         wordCountTarget.value = state.wordCountTarget || 3000
         selectedStyle.value = state.selectedStyle || 'default'
+        selectedStyleStrength.value = state.selectedStyleStrength || 'medium'
+        selectedTechniques.value = state.selectedTechniques || []
         addLog(`已恢复上次创作状态`)
         
         // 加载小说数据
-        loadNovelData()
+        loadNovelData().then(async () => {
+          if (state.fromAutoCreation && state.selectedNovelId) {
+            try {
+              await handleChapterSelect(String(state.currentChapterNum || 1))
+              addLog('已按全自动创作路线加载首章与蓝图上下文')
+            } catch (error) {
+              console.error('恢复全自动创作首章失败:', error)
+            }
+          }
+        })
       }
     } catch (e) {
       console.error('恢复状态失败:', e)
@@ -737,6 +1150,72 @@ const loadChapters = async () => {
   }
 }
 
+const buildChapterContinuationSummary = (chapter = {}) => {
+  const content = chapter.content || ''
+  if (!content) return ''
+
+  const start = content.slice(0, 160).trim()
+  const end = content.slice(-220).trim()
+
+  if (start && end && start !== end) {
+    return `${start}\n……\n${end}`
+  }
+
+  return (start || end).trim()
+}
+
+const buildFallbackOutline = (newNum, recentChapters = []) => {
+  const latest = recentChapters[recentChapters.length - 1]
+  if (!latest) {
+    return `第${newNum}章必须承接上一章结尾，推进新的冲突、发现或后果，不能重复上一章已经发生的主事件。`
+  }
+
+  const latestTitle = latest.title || `第${latest.chapter_num}章`
+  const latestSummary = buildChapterContinuationSummary(latest)
+  return [
+    `第${newNum}章必须紧接${latestTitle}的结尾继续发展。`,
+    '必须描写上一章事件带来的新后果、新目标或新冲突。',
+    latestSummary ? `最近一章关键信息：${latestSummary}` : '',
+    '禁止重复上一章已经发生的主事件，本章至少推进一个新的剧情节点。'
+  ].filter(Boolean).join('\n')
+}
+
+const saveChapterSilently = async () => {
+  if (!selectedNovelId.value || !currentChapterNum.value) return null
+  if (!chapterContent.value && !chapterOutline.value && !chapterTitle.value) return null
+
+  return await apiClient.novels.updateChapter(selectedNovelId.value, currentChapterNum.value, {
+    content: chapterContent.value,
+    title: chapterTitle.value,
+    outline: chapterOutline.value,
+    status: 'draft'
+  })
+}
+
+const syncCurrentChapterToList = (overrides = {}) => {
+  const targetNum = overrides.num || currentChapterNum.value
+  if (!targetNum) return
+
+  const existingIndex = chapters.value.findIndex(ch => ch.num === targetNum)
+  const chapterItem = {
+    num: targetNum,
+    title: overrides.title ?? (chapterTitle.value || `第${targetNum}章`),
+    status: overrides.status ?? 'draft',
+    wordCount: overrides.wordCount ?? currentWordCount.value,
+    updatedAt: overrides.updatedAt ?? new Date().toISOString()
+  }
+
+  if (existingIndex >= 0) {
+    chapters.value[existingIndex] = {
+      ...chapters.value[existingIndex],
+      ...chapterItem
+    }
+  } else {
+    chapters.value.push(chapterItem)
+    chapters.value.sort((a, b) => a.num - b.num)
+  }
+}
+
 const createNewChapter = async () => {
   try {
     const newNum = Math.max(0, ...chapters.value.map(c => c.num)) + 1
@@ -759,6 +1238,45 @@ const createNewChapter = async () => {
     ElMessage.success('章节创建成功')
   } catch (error) {
     ElMessage.error('创建章节失败：' + error.message)
+  } finally {
+    creatingNextChapter.value = false
+  }
+}
+
+const deleteChapter = async (chapter) => {
+  if (!selectedNovelId.value) return
+
+  try {
+    await ElMessageBox.confirm(
+      `确定删除第${chapter.num}章吗？删除后无法恢复。`,
+      '确认删除章节',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    await apiClient.novels.deleteChapter(selectedNovelId.value, chapter.num)
+    addLog(`删除章节：第${chapter.num}章`)
+
+    if (currentChapterNum.value === chapter.num) {
+      const fallback = chapters.value.filter(c => c.num !== chapter.num).slice(-1)[0]
+      currentChapterNum.value = fallback?.num || 1
+      chapterTitle.value = ''
+      chapterOutline.value = ''
+      chapterContent.value = ''
+    }
+
+    await loadChapters()
+    if (chapters.value.length > 0 && chapters.value.some(c => c.num === currentChapterNum.value)) {
+      await handleChapterSelect(String(currentChapterNum.value))
+    }
+    ElMessage.success('章节已删除')
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除章节失败：' + (error.message || '未知错误'))
+    }
   }
 }
 
@@ -781,76 +1299,304 @@ const handleChapterSelect = async (index) => {
   }
 }
 
-const startWriting = async () => {
-  if (!chapterOutline.value) {
+const startWriting = async (options = {}) => {
+  const { skipOutlineValidation = false } = options
+
+  if (!skipOutlineValidation && !chapterOutline.value) {
     ElMessage.warning('请先输入本章大纲')
-    return
+    return false
   }
   
   if (!selectedNovelId.value) {
     ElMessage.warning('请先选择小说')
-    return
+    return false
   }
   
   writing.value = true
   progressVisible.value = true
   progress.value = 0
   currentStep.value = 0
-  currentStage.value = '开始创作流程...'
+  currentStage.value = '提交创作任务...'
+  latestTaskId.value = ''
   
   addLog(`开始创作第${currentChapterNum.value}章`)
+  addLog(`目标字数：${wordCountTarget.value}`)
   
   try {
-    // 调用真实的 AI 创作 API
-    const result = await apiClient.writing.createChapter({
-      novel_id: selectedNovelId.value,
-      chapter_num: currentChapterNum.value,
-      outline: chapterOutline.value,
-      word_count_target: wordCountTarget.value,
-      style: selectedStyle.value
-    })
+    // 提交创作任务，获取 task_id
+      const result = await apiClient.writing.createChapter({
+        novel_id: selectedNovelId.value,
+        chapter_num: currentChapterNum.value,
+        outline: chapterOutline.value,
+        word_count_target: wordCountTarget.value,
+        style: selectedStyle.value,
+        style_context: {
+          ...(authorStyleMap[selectedStyle.value] || defaultAutoStyle),
+          strength: selectedStyleStrength.value,
+          techniques: [...selectedTechniques.value]
+        },
+        creative_settings: buildCreativeSettingsPayload()
+      })
     
-    if (result.data && result.data.content) {
-      // 创作成功，直接显示内容
-      progress.value = 100
-      progressStatus.value = 'success'
-      currentStage.value = '创作完成！'
-      addLog('✅ 章节创作完成')
-      ElMessage.success('章节创作完成！')
+    if (!result.data || !result.data.task_id) {
+      throw new Error(result.message || '任务提交失败')
+    }
+    
+    const taskId = result.data.task_id
+    latestTaskId.value = taskId
+    addLog(`任务已提交，task_id: ${taskId}`)
+    currentStage.value = 'AI 正在创作中...'
+    
+    // 轮询任务进度
+    const pollInterval = 3000 // 每3秒轮询一次
+    const maxPolls = 2400 // 最多轮询2小时，写作以大模型写完为准
+    
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval))
       
-      chapterContent.value = result.data.content
-      chapterTitle.value = chapterTitle.value || `第${currentChapterNum.value}章`
-      addLog(`生成字数：${result.data.word_count || chapterContent.value.length}字`)
+      const statusResult = await apiClient.writing.getTaskStatus(taskId)
       
-      // 自动保存
-      await saveChapter()
+      if (!statusResult.data) {
+        continue
+      }
       
-      setTimeout(() => {
-        progressVisible.value = false
-      }, 2000)
-    } else {
-      // 创作失败
+      const taskData = statusResult.data
+      const taskStatus = taskData.status
+      const taskProgress = taskData.progress || 0
+      const currentStageText = normalizeTaskStage(taskData.current_stage || '')
+      
+      // 更新进度
+      progress.value = taskProgress
+      if (currentStageText) {
+        currentStage.value = currentStageText
+      }
+      
+      if (taskStatus === 'completed') {
+        // 任务完成
+        progress.value = 100
+        progressStatus.value = 'success'
+        currentStage.value = '创作完成！'
+        addLog('✅ 章节创作完成')
+        ElMessage.success(`第${currentChapterNum.value}章创作完成，已自动保存并刷新列表。`)
+        
+        // 如果有内容预览，显示
+        if (taskData.result && taskData.result.content) {
+          chapterContent.value = taskData.result.content
+          chapterTitle.value = chapterTitle.value || `第${currentChapterNum.value}章`
+          syncCurrentChapterToList({
+            title: chapterTitle.value,
+            wordCount: taskData.result.word_count || chapterContent.value.length,
+            updatedAt: new Date().toISOString()
+          })
+          addLog(`生成字数：${taskData.result.word_count || chapterContent.value.length}字`)
+        }
+        
+        // 自动保存
+        await saveChapter()
+        await loadChapters()
+        
+        // 保存下一章交接棒到 localStorage
+        if (taskData.result && taskData.result.next_chapter_baton) {
+          const batonState = JSON.parse(localStorage.getItem('writing_panel_state') || '{}')
+          batonState.next_chapter_baton = taskData.result.next_chapter_baton
+          batonState.chapter_plan = taskData.result.chapter_plan
+          batonState.review_packet = taskData.result.review_packet
+          batonState.character_state_packet = taskData.result.character_state_packet
+          localStorage.setItem('writing_panel_state', JSON.stringify(batonState))
+          addLog('✓ 已保存下一章交接信息')
+        }
+        
+        setTimeout(() => {
+          progressVisible.value = false
+        }, 2000)
+        return true
+      } else if (taskStatus === 'failed') {
+        // 任务失败
+        progressStatus.value = 'exception'
+        currentStage.value = taskData.error || '创作失败'
+        addLog('❌ 创作失败：' + (taskData.error || '未知错误'))
+        ElMessage.error((taskData.error || '创作失败') + '。如需排查，可记录任务编号后到任务监控查看。')
+        
+        setTimeout(() => {
+          progressVisible.value = false
+        }, 2000)
+        return false
+      } else if (taskStatus === 'cancelled') {
+        // 任务取消
+        progressStatus.value = 'exception'
+        currentStage.value = '创作已取消'
+        addLog('❌ 创作已取消')
+        ElMessage.warning('创作已取消')
+        
+        setTimeout(() => {
+          progressVisible.value = false
+        }, 2000)
+        return false
+      }
+      // 否则继续轮询 (pending 或 running)
+    }
+    
+    // 如果超过最大轮询次数
+    if (progress.value < 100 && progressStatus.value !== 'exception') {
       progressStatus.value = 'exception'
-      currentStage.value = result.message || '创作失败'
-      addLog('❌ 创作失败：' + result.message)
-      ElMessage.error(result.message || '创作失败')
+      currentStage.value = '创作超时'
+      addLog('❌ 创作超时，请稍后查看任务状态')
+      ElMessage.warning('创作耗时较长，任务仍可能在后台继续。你可以关闭弹窗后稍后回来查看。')
       
       setTimeout(() => {
         progressVisible.value = false
       }, 2000)
+      return false
     }
   } catch (error) {
     progressStatus.value = 'exception'
     currentStage.value = '创作失败'
     addLog('❌ 创作失败：' + error.message)
-    ElMessage.error('创作失败：' + error.message)
+    ElMessage.error('创作失败：' + error.message + '。建议保留任务编号便于继续排查。')
     
     setTimeout(() => {
       progressVisible.value = false
     }, 2000)
+    return false
   } finally {
     writing.value = false
   }
+}
+
+const continueWriting = async () => {
+  // 自动创建下一章并自动生成大纲后直接开始创作
+  creatingNextChapter.value = true
+  try {
+    const previousChapterNum = currentChapterNum.value
+    if (chapterContent.value || chapterOutline.value || chapterTitle.value) {
+      await saveChapterSilently()
+      addLog(`续写前已保存第${previousChapterNum}章，确保使用最新上下文`)
+    }
+
+    await loadChapters()
+    const newNum = Math.max(0, ...chapters.value.map(c => c.num)) + 1
+
+    await apiClient.novels.createChapter(selectedNovelId.value, {
+      chapter_num: newNum,
+      title: '',
+      outline: ''
+    })
+    
+    currentChapterNum.value = newNum
+    chapterTitle.value = `第${newNum}章`
+    chapterOutline.value = ''
+    chapterContent.value = ''
+
+    await loadChapters()
+
+    const recentChapterNums = chapters.value
+      .filter(c => c.num < newNum)
+      .slice(-3)
+      .map(c => c.num)
+
+    const recentChapterDetails = await Promise.all(
+      recentChapterNums.map(async (num) => {
+        try {
+          const chapterResult = await apiClient.novels.getChapter(selectedNovelId.value, num)
+          const data = chapterResult.data || {}
+          return {
+            chapter_num: num,
+            title: data.title || `第${num}章`,
+            outline: data.outline || '',
+            content_summary: buildChapterContinuationSummary(data),
+            content: data.content || ''
+          }
+        } catch {
+          return null
+        }
+      })
+    )
+    const validRecentChapters = recentChapterDetails.filter(Boolean)
+    
+    // 读取上一章的交接棒
+    const savedState = JSON.parse(localStorage.getItem('writing_panel_state') || '{}')
+    const nextChapterBaton = savedState.next_chapter_baton || null
+    const prevChapterPlan = savedState.chapter_plan || null
+    const prevReviewPacket = savedState.review_packet || null
+    const prevCharacterState = savedState.character_state_packet || null
+    
+    addLog(`正在为第${newNum}章自动生成大纲...`)
+    const prevChaptersSummary = validRecentChapters
+      .map(c => `第${c.chapter_num}章：${c.title || '无题'}\n${c.content_summary || '无摘要'}`)
+      .join('\n\n')
+
+    const activeStyle = availableStyles.value.find(s => s.id === selectedStyle.value)
+      || novelSettingsCache.value?.settings?.active_style
+      || defaultAutoStyle
+    
+    try {
+      const result = await apiClient.ai.generateChapterOutline({
+        novel_title: novels.value.find(n => n.id === selectedNovelId.value)?.title || '',
+        chapter_num: newNum,
+        overall_outline: novelSettingsCache.value?.description || prevChaptersSummary,
+        next_chapter_baton: nextChapterBaton,
+        context: {
+          novel_description: novelSettingsCache.value?.description || '',
+          recent_chapters: validRecentChapters,
+          active_style: activeStyle || defaultAutoStyle,
+          known_characters: chapterCharacters.value.map(char => ({ name: char.name, role: char.role })),
+          unresolved_hooks: unresolvedHookList.value.map(hook => ({ description: hook.description, hook_type: hook.type })),
+          prev_chapter_plan: prevChapterPlan,
+          prev_review_packet: prevReviewPacket,
+          prev_character_state: prevCharacterState
+        }
+      })
+      if (result.data && result.data.outline) {
+        chapterOutline.value = result.data.outline
+        const titleMatch = result.data.outline.match(/(?:本章标题|标题)[：: ]+(.+)/)
+        const extractedTitle = titleMatch?.[1]?.split('\n')[0]?.trim()
+        if (extractedTitle) {
+          chapterTitle.value = extractedTitle
+          syncCurrentChapterToList({
+            num: newNum,
+            title: extractedTitle,
+            wordCount: 0,
+            updatedAt: new Date().toISOString()
+          })
+          addLog(`✅ 已自动提取第${newNum}章标题：${extractedTitle}`)
+        }
+        addLog(`✅ 已自动生成第${newNum}章大纲`)
+      } else {
+        chapterOutline.value = buildFallbackOutline(newNum, validRecentChapters)
+        chapterTitle.value = `第${newNum}章`
+        syncCurrentChapterToList({
+          num: newNum,
+          title: chapterTitle.value,
+          wordCount: 0,
+          updatedAt: new Date().toISOString()
+        })
+        addLog(`⚠️ 大纲生成失败，使用默认大纲`)
+      }
+    } catch (e) {
+      chapterOutline.value = buildFallbackOutline(newNum, validRecentChapters)
+      chapterTitle.value = `第${newNum}章`
+      syncCurrentChapterToList({
+        num: newNum,
+        title: chapterTitle.value,
+        wordCount: 0,
+        updatedAt: new Date().toISOString()
+      })
+      addLog(`⚠️ 大纲自动生成失败，使用默认大纲`)
+      addLog(`大纲生成失败原因：${e.message || '未知错误'}`)
+    }
+    
+    addLog(`正在自动开始第${newNum}章创作...`)
+    ElMessage.success(`第${newNum}章已创建，正在自动创作（已承接最新章节上下文）`) 
+    await startWriting({ skipOutlineValidation: true })
+  } catch (error) {
+    ElMessage.error('创建章节失败：' + error.message)
+  } finally {
+    creatingNextChapter.value = false
+  }
+}
+
+const handleProgressClose = () => {
+  addLog('已关闭创作进度弹窗，任务继续在后台运行')
 }
 
 const saveChapter = async () => {
@@ -865,6 +1611,12 @@ const saveChapter = async () => {
       chapterTitle.value = result.data.title || chapterTitle.value
       chapterOutline.value = result.data.outline || chapterOutline.value
       chapterContent.value = result.data.content || chapterContent.value
+      syncCurrentChapterToList({
+        title: result.data.title || chapterTitle.value,
+        wordCount: result.data.word_count || chapterContent.value.length,
+        status: result.data.status || 'draft',
+        updatedAt: result.data.updated_at || new Date().toISOString()
+      })
     }
     addLog(`保存章节：第${currentChapterNum.value}章 (${currentWordCount.value}字)`)
     ElMessage.success('章节已保存')
@@ -876,15 +1628,48 @@ const saveChapter = async () => {
   }
 }
 
+const getExportPlatformLabel = (platform) => {
+  if (platform === 'fanqiao') return '番茄导出版本'
+  if (platform === 'qimao') return '七猫导出版本'
+  return platform || '导出版本'
+}
+
 const exportChapter = () => {
-  const blob = new Blob([chapterContent.value], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `第${currentChapterNum.value}章 - ${chapterTitle.value || '无题'}.txt`
-  a.click()
-  URL.revokeObjectURL(url)
-  addLog(`导出章节：第${currentChapterNum.value}章`)
+  if (!canExportCurrentChapter.value) {
+    ElMessage.warning('请先选择小说和章节')
+    return
+  }
+  exportDialogVisible.value = true
+  exportError.value = ''
+  exportResults.value = []
+}
+
+const confirmExportChapter = async () => {
+  if (!selectedNovelId.value || !currentChapterNum.value) {
+    ElMessage.warning('请先选择小说和章节')
+    return
+  }
+
+  exportLoading.value = true
+  exportError.value = ''
+  exportResults.value = []
+  addLog(`开始导出第${currentChapterNum.value}章，目标：${exportTarget.value}`)
+
+  try {
+    const result = await apiClient.novels.exportChapter(selectedNovelId.value, currentChapterNum.value, {
+      target: exportTarget.value
+    })
+    const variants = result.data?.variants || []
+    exportResults.value = variants
+    addLog(`导出完成：返回 ${variants.length} 个平台版本`)
+    ElMessage.success('导出完成')
+  } catch (error) {
+    exportError.value = error.response?.data?.detail || error.message || '导出失败'
+    addLog(`导出失败：${exportError.value}`)
+    ElMessage.error(`导出失败：${exportError.value}`)
+  } finally {
+    exportLoading.value = false
+  }
 }
 
 const showStylePreview = () => {
@@ -892,11 +1677,104 @@ const showStylePreview = () => {
   if (style) {
     stylePreview.value = {
       name: style.name,
-      description: `${style.name}的写作风格`,
-      features: ['特色 1', '特色 2', '特色 3']
+      description: style.description,
+      features: style.features,
+      forbidden: style.forbidden || [],
+      toneExample: style.toneExample
     }
   } else {
     stylePreview.value = null
+  }
+}
+
+const generateStylePreview = async () => {
+  try {
+    previewLoading.value = true
+    const result = await apiClient.ai.generateStylePreview({
+      style_id: selectedStyle.value,
+      strength: selectedStyleStrength.value,
+      prompt_seed: `${chapterTitle.value || '测试章节'}：${chapterOutline.value || '少年在雨夜独自踏上修炼之路，前方危机四伏。'}`
+    })
+    stylePreviewText.value = result.data?.preview || ''
+    ElMessage.success('风格试写生成成功')
+  } catch (error) {
+    ElMessage.error('风格试写失败：' + (error.response?.data?.detail || error.message))
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+const generateComparePreviews = async () => {
+  try {
+    compareLoading.value = true
+    const compareStyles = compareStyleIds.value
+      .filter((value, index, arr) => arr.indexOf(value) === index)
+      .slice(0, 4)
+
+    if (compareStyles.length < 2) {
+      ElMessage.warning('请至少选择 2 个风格进行对比')
+      return
+    }
+
+    const results = await Promise.all(
+      compareStyles.map(async (styleId) => {
+        const result = await apiClient.ai.generateStylePreview({
+          style_id: styleId,
+          strength: selectedStyleStrength.value,
+          prompt_seed: `${chapterTitle.value || '测试章节'}：${chapterOutline.value || '少年在雨夜独自踏上修炼之路，前方危机四伏。'}`
+        })
+        return {
+          styleId,
+          styleName: result.data?.style_name || styleId,
+          preview: result.data?.preview || ''
+        }
+      })
+    )
+
+    comparePreviewCards.value = results
+    ElMessage.success('多风格对比试写生成成功')
+  } catch (error) {
+    ElMessage.error('多风格对比试写失败：' + (error.response?.data?.detail || error.message))
+  } finally {
+    compareLoading.value = false
+  }
+}
+
+const syncNovelActiveStyle = async () => {
+  if (!selectedNovelId.value) return
+
+  try {
+    const baseSettings = novelSettingsCache.value?.settings || {}
+    const styleConfig = availableStyles.value.find(s => s.id === selectedStyle.value)
+      || defaultAutoStyle
+
+    if (!styleConfig) return
+
+    const resolvedStyleConfig = {
+      ...(authorStyleMap[styleConfig.id] || defaultAutoStyle),
+      strength: selectedStyleStrength.value
+    }
+
+    await apiClient.novels.update(selectedNovelId.value, {
+      settings: {
+        ...baseSettings,
+        active_style: resolvedStyleConfig,
+        creative_settings: buildCreativeSettingsPayload()
+      }
+    })
+
+    if (novelSettingsCache.value) {
+      novelSettingsCache.value = {
+        ...novelSettingsCache.value,
+        settings: {
+          ...baseSettings,
+          active_style: resolvedStyleConfig,
+          creative_settings: buildCreativeSettingsPayload()
+        }
+      }
+    }
+  } catch (error) {
+    console.error('同步小说风格失败:', error)
   }
 }
 
@@ -1039,21 +1917,36 @@ const formatDate = (dateString) => {
 
 // 自动保存 + 持久化
 let autoSaveTimer = null
-watch([selectedNovelId, currentChapterNum, chapterTitle, chapterOutline, chapterContent, wordCountTarget, selectedStyle], () => {
+watch([selectedNovelId, currentChapterNum, chapterTitle, chapterOutline, chapterContent, wordCountTarget, selectedStyle, selectedStyleStrength, selectedTechniques], () => {
   if (autoSaveTimer) clearTimeout(autoSaveTimer)
   autoSaveTimer = setTimeout(() => {
     // 保存到 localStorage
     saveCurrentState()
     
     // 如果有内容，保存到数据库
-    if (chapterContent.value || chapterOutline.value) {
+    if (!writing.value && !creatingNextChapter.value && (chapterContent.value || chapterOutline.value)) {
       saveChapter()
       addLog('自动保存成功')
     }
   }, 5000) // 5 秒自动保存
 }, { deep: true })
 
+watch([selectedStyle, selectedStyleStrength], () => {
+  showStylePreview()
+  syncNovelActiveStyle()
+})
+
+watch(selectedTechniques, () => {
+  syncNovelActiveStyle()
+}, { deep: true })
+
+watch(selectedStyle, () => {
+  showStylePreview()
+  syncNovelActiveStyle()
+})
+
 onMounted(() => {
+  loadStylePresets()
   loadNovels()
   addLog('写作面板已就绪')
   
@@ -1081,8 +1974,31 @@ onMounted(() => {
 
 <style scoped>
 .writing-panel {
-  max-width: 1800px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+}
+
+.blueprint-card {
+  margin-bottom: 20px;
+}
+
+.blueprint-summary-card {
+  margin-bottom: 12px;
+  min-height: 120px;
+  background: #fafcff;
+  border: 1px solid #e6f4ff;
+}
+
+.blueprint-summary-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #303133;
+}
+
+.blueprint-summary-content {
+  color: #606266;
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 
 .novel-selector-card {
@@ -1095,21 +2011,103 @@ onMounted(() => {
   align-items: center;
 }
 
-.chapter-title {
-  font-size: 12px;
-  color: #666;
-  margin-top: 4px;
+.chapters-card {
+  height: fit-content;
+  max-height: calc(100vh - 400px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.chapters-card :deep(.el-card__body) {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+}
+
+.chapters-list {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.chapter-card {
+  position: relative;
+  padding: 12px;
+  margin-bottom: 8px;
+  background: #fafafa;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.chapter-card:hover {
+  background: #f0f7ff;
+  border-color: #409EFF;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.15);
+}
+
+.chapter-card.chapter-active {
+  background: #e6f4ff;
+  border-color: #409EFF;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.25);
+}
+
+.chapter-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.chapter-num {
+  font-weight: 600;
+  font-size: 14px;
+  color: #303133;
+}
+
+.chapter-title-text {
+  font-size: 13px;
+  color: #606266;
+  margin-bottom: 6px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.4;
 }
 
-.chapter-meta {
+.chapter-footer {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #909399;
+}
+
+.chapter-words {
+  font-weight: 500;
+}
+
+.chapter-date {
   font-size: 11px;
-  color: #999;
-  margin-top: 4px;
+}
+
+.chapter-delete-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 6px;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.chapter-card:hover .chapter-delete-btn {
+  opacity: 1;
 }
 
 .outline-section, .content-section {
@@ -1151,6 +2149,21 @@ onMounted(() => {
 
 .style-preview {
   margin-top: 10px;
+}
+
+.compare-preview-card {
+  margin-top: 8px;
+}
+
+.compare-preview-title {
+  font-weight: 600;
+}
+
+.compare-preview-content {
+  white-space: pre-wrap;
+  line-height: 1.8;
+  font-size: 13px;
+  color: #303133;
 }
 
 .agent-item {

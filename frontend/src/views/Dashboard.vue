@@ -26,9 +26,12 @@
     <h3>系统状态</h3>
     <el-row :gutter="20">
       <el-col :span="6">
-        <el-statistic title="API 状态" :value="apiStatus">
-          <template #suffix>{{ apiStatus === '正常' ? '✅' : '❌' }}</template>
-        </el-statistic>
+        <div class="status-statistic">
+          <div class="status-statistic__label">API 状态</div>
+          <div class="status-statistic__value">
+            <el-tag :type="apiStatusType">{{ apiStatus }}</el-tag>
+          </div>
+        </div>
       </el-col>
       <el-col :span="6">
         <el-statistic title="Agent 数量" :value="7" />
@@ -44,9 +47,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 
 const apiStatus = ref('检查中...')
+
+const apiStatusType = computed(() => {
+  if (apiStatus.value === '正常') return 'success'
+  if (apiStatus.value === '检查中...') return 'info'
+  return 'danger'
+})
 
 const checkApiStatus = async () => {
   try {
@@ -74,5 +83,17 @@ ul, ol {
 h3 {
   margin-top: 20px;
   margin-bottom: 10px;
+}
+
+.status-statistic__label {
+  color: var(--el-text-color-secondary);
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.status-statistic__value {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
 }
 </style>

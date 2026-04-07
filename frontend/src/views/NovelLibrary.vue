@@ -44,14 +44,15 @@
     </el-card>
     
     <!-- 小说列表 -->
-    <el-row :gutter="20" v-show="paginatedNovels.length > 0">
+    <el-row :gutter="20" v-show="!loadError && paginatedNovels.length > 0">
       <el-col :span="8" v-for="novel in paginatedNovels" :key="novel.id">
         <el-card class="novel-card" shadow="hover">
           <template #header>
             <div class="novel-header">
               <el-checkbox 
-                v-model="selectedNovels" 
+                :model-value="selectedNovels.includes(novel.id)"
                 :label="novel.id"
+                @change="toggleNovelSelection(novel.id, $event)"
                 @click.stop
               />
               <span class="novel-title">{{ novel.title }}</span>
@@ -90,7 +91,7 @@
     
     <!-- 分页 -->
     <el-pagination
-      v-show="totalPages > 1"
+      v-show="!loadError && totalPages > 1"
       v-model:current-page="currentPage"
       :page-size="pageSize"
       :total="filteredNovels.length"
@@ -99,7 +100,14 @@
     />
     
     <!-- 空状态 -->
-    <el-empty v-show="novels.length === 0" description="暂无小说，快去创作吧！">
+    <el-empty
+      v-show="loadError"
+      :description="loadError"
+    >
+      <el-button type="primary" @click="loadNovels">🔄 重试加载</el-button>
+    </el-empty>
+
+    <el-empty v-show="!loadError && novels.length === 0" description="暂无小说，快去创作吧！">
       <el-button type="primary" @click="$router.push('/auto')">🚀 开始创作</el-button>
     </el-empty>
     
@@ -118,16 +126,17 @@
         <el-divider />
         
         <h4>📝 章节列表</h4>
-        <el-table :data="chapters" stripe max-height="400">
-          <el-table-column prop="chapter_num" label="章节" width="80" />
-          <el-table-column prop="title" label="标题" />
-          <el-table-column prop="word_count" label="字数" width="80" />
-          <el-table-column label="操作" width="150" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" @click="viewChapter(row)">👁️ 查看</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+          <el-table :data="chapters" stripe max-height="400">
+            <el-table-column prop="chapter_num" label="章节" width="80" />
+            <el-table-column prop="title" label="标题" />
+            <el-table-column prop="word_count" label="字数" width="80" />
+            <el-table-column label="操作" width="220" fixed="right">
+              <template #default="{ row }">
+                <el-button size="small" @click="viewChapter(row)">👁️ 查看</el-button>
+                <el-button size="small" type="danger" @click="deleteChapter(row)">🗑️ 删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
       </div>
     </el-dialog>
     
@@ -264,6 +273,7 @@ const editForm = reactive({
 
 // 下载选项
 const downloadFormat = ref('txt')
+const loadError = ref('')
 
 // 计算属性
 const filteredNovels = computed(() => {
@@ -303,14 +313,24 @@ const formatDate = (dateString) => {
 
 const loadNovels = async () => {
   try {
+    loadError.value = ''
     const result = await apiClient.novels.list()
     if (result.data && result.data.novels) {
       novels.value = result.data.novels
       currentPage.value = 1
       ElMessage.success(`加载了 ${novels.value.length} 本小说`)
+      return
     }
+
+    novels.value = []
+    loadError.value = '小说列表接口已返回，但未包含有效数据。请稍后重试。'
   } catch (error) {
-    ElMessage.error('加载小说列表失败：' + error.message)
+    novels.value = []
+    const status = error.response?.status
+    loadError.value = status >= 500
+      ? '小说仓库服务暂时异常，请检查后端服务或稍后重试。'
+      : `加载小说列表失败：${error.message || '未知错误'}`
+    ElMessage.error(loadError.value)
   }
 }
 
@@ -322,13 +342,49 @@ const viewNovel = async (novelId) => {
     chapters.value = chaptersResult.data?.chapters || []
     viewVisible.value = true
   } catch (error) {
-    ElMessage.error('加载小说详情失败：' + error.message)
+    const status = error.response?.status
+    ElMessage.error(status >= 500
+      ? '小说详情服务暂时异常，请先确认后端正常运行。'
+      : '加载小说详情失败：' + error.message)
   }
 }
 
 const viewChapter = (chapter) => {
   currentChapter.value = chapter
   chapterVisible.value = true
+}
+
+const deleteChapter = async (chapter) => {
+  if (!selectedNovel.value?.id) return
+
+  try {
+    await ElMessageBox.confirm(
+      `确定删除第${chapter.chapter_num}章吗？删除后无法恢复。`,
+      '确认删除章节',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    await apiClient.novels.deleteChapter(selectedNovel.value.id, chapter.chapter_num)
+    chapters.value = chapters.value.filter(item => item.chapter_num !== chapter.chapter_num)
+
+    if (currentChapter.value?.chapter_num === chapter.chapter_num) {
+      currentChapter.value = null
+      chapterVisible.value = false
+    }
+
+    const latestNovel = await apiClient.novels.get(selectedNovel.value.id)
+    selectedNovel.value = latestNovel.data
+    await loadNovels()
+    ElMessage.success('章节已删除')
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除章节失败：' + (error.message || '未知错误'))
+    }
+  }
 }
 
 const editNovel = async (novelId) => {
@@ -522,13 +578,24 @@ const clearSelection = () => {
   selectedNovels.value = []
 }
 
+const toggleNovelSelection = (novelId, checked) => {
+  if (checked) {
+    if (!selectedNovels.value.includes(novelId)) {
+      selectedNovels.value = [...selectedNovels.value, novelId]
+    }
+    return
+  }
+
+  selectedNovels.value = selectedNovels.value.filter(id => id !== novelId)
+}
+
 onMounted(() => {
   loadNovels()
 })
 </script>
 
 <style scoped>
-.novel-library { max-width: 1400px; margin: 0 auto; padding: 20px; }
+.novel-library { width: 100%; max-width: none; padding: 20px; }
 .batch-card { margin-bottom: 20px; background: #fff7e6; border-color: #ffd591; }
 .batch-toolbar { display: flex; justify-content: space-between; align-items: center; }
 .batch-info { font-size: 14px; color: #d46b08; font-weight: bold; }
