@@ -65,12 +65,14 @@ export const apiClient = {
   agents: {
     getStatus: () => api.get('/agents/status'),
     execute: (agentId, task) => api.post(`/agents/${agentId}/execute`, task),
-    getTaskStatus: (taskId) => api.get(`/tasks/${taskId}`)
+    getTaskStatus: (taskId) => api.get(`/tasks/${taskId}`),
+    listTasks: (params = {}) => api.get('/tasks', { params })
   },
   
   // 写作流程
   writing: {
-    createChapter: (data) => api.post('/writing/chapter', data),
+    createChapter: (data) => api.post('/writing/chapter', data, { timeout: 0 }),
+    getTaskStatus: (taskId) => api.get(`/writing/task/${taskId}`),
     getWorkflow: (workflowId) => api.get(`/writing/workflow/${workflowId}`),
     getChapter: (projectId, chapterNum) => api.get(`/writing/chapter/${projectId}/${chapterNum}`),
     updateChapter: (projectId, chapterNum, data) => api.put(`/writing/chapter/${projectId}/${chapterNum}`, data)
@@ -78,7 +80,7 @@ export const apiClient = {
   
   // 学习系统
   learning: {
-    analyze: (data) => api.post('/learning/analyze', data),
+    analyze: (data) => api.post('/learning/analyze', data, { timeout: 0 }),
     getAnalysisStatus: (analysisId) => api.get(`/learning/analysis/${analysisId}`),
     getWorks: () => api.get('/learning/works'),
     getWorkDetail: (analysisId) => api.get(`/learning/works/${analysisId}`),
@@ -109,6 +111,8 @@ export const apiClient = {
     createChapter: (novelId, data) => api.post(`/novels/${novelId}/chapters`, data),
     getChapter: (novelId, chapterNum) => api.get(`/novels/${novelId}/chapters/${chapterNum}`),
     updateChapter: (novelId, chapterNum, data) => api.put(`/novels/${novelId}/chapters/${chapterNum}`, data),
+    exportChapter: (novelId, chapterNum, data) => api.post(`/novels/${novelId}/chapters/${chapterNum}/export`, data, { timeout: 0 }),
+    deleteChapter: (novelId, chapterNum) => api.delete(`/novels/${novelId}/chapters/${chapterNum}`),
     getCharacters: (novelId) => api.get(`/novels/${novelId}/characters`),
     addCharacter: (novelId, data) => api.post(`/novels/${novelId}/characters`, data),
     getHooks: (novelId) => api.get(`/novels/${novelId}/hooks`)
@@ -118,15 +122,17 @@ export const apiClient = {
   ai: {
     generateOutline: (data) => api.post('/ai/generate-outline', data),
     generateCharacters: (data) => api.post('/ai/generate-characters', data),
-    generateChapterOutline: (data) => api.post('/ai/generate-chapter-outline', data),
-    generatePlot: (data) => api.post('/api/generate-plot', data),
+    generateChapterOutline: (data) => api.post('/ai/generate-chapter-outline', data, { timeout: 0 }),
+    generateStylePreview: (data) => api.post('/ai/generate-style-preview', data, { timeout: 0 }),
+    generatePlot: (data) => api.post('/ai/generate-plot', data),
     getTemplates: () => api.get('/ai/templates')
   },
   
   // 全自动创作
   auto: {
-    create: (data) => api.post('/auto/create', data, { timeout: 300000 }),
-    getBlueprint: (novelId) => api.get(`/auto/blueprint/${novelId}`)
+    create: (data) => api.post('/auto/create', data, { timeout: 0 }),
+    getBlueprint: (novelId) => api.get(`/auto/blueprint/${novelId}`),
+    getTaskStatus: (taskId) => api.get(`/auto/task/${taskId}`)
   }
 }
 

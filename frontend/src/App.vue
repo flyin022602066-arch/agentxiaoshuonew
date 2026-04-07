@@ -1,13 +1,13 @@
 <template>
   <div id="app">
-    <el-container>
-      <el-header>
+    <el-container class="app-shell">
+      <el-header class="app-header">
         <h1>📚 多 Agent 协作小说系统</h1>
         <span class="version">v1.0.0</span>
       </el-header>
       
-      <el-container>
-        <el-aside width="200px">
+      <el-container class="content-shell">
+        <el-aside width="200px" class="app-sidebar">
           <el-menu
             :default-active="activeMenu"
             background-color="#304156"
@@ -50,7 +50,7 @@
           </el-menu>
         </el-aside>
         
-        <el-main>
+        <el-main class="app-main">
           <router-view />
         </el-main>
       </el-container>
@@ -73,22 +73,50 @@ const handleMenuSelect = (index) => {
 }
 </script>
 
-<style scoped>
+<style>
+html,
+body,
+#app {
+  margin: 0;
+  width: 100%;
+  min-width: 100vw;
+  min-height: 100vh;
+}
+
+body {
+  overflow-y: auto;
+}
+
 #app {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
   height: 100vh;
 }
 
-.el-header {
+.app-shell {
+  width: 100%;
+  min-width: 100vw;
+  min-height: 100vh;
+}
+
+.content-shell {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  overflow: auto;
+}
+
+.app-header {
   background-color: #304156;
   color: white;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.el-header h1 {
+.app-header h1 {
   margin: 0;
   font-size: 24px;
 }
@@ -98,19 +126,24 @@ const handleMenuSelect = (index) => {
   opacity: 0.8;
 }
 
-.el-aside {
+.app-sidebar {
   background-color: #304156;
   color: white;
   overflow-y: auto;
+  flex-shrink: 0;
 }
 
-.el-main {
+.app-main {
   background-color: #f0f2f5;
   padding: 20px;
   overflow-y: auto;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.el-menu {
+.app-sidebar .el-menu {
   border-right: none;
+  width: 100%;
 }
 </style>
