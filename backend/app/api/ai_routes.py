@@ -52,6 +52,18 @@ async def ai_generate_chapter_outline(data: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/ai/generate-style-preview")
+async def ai_generate_style_preview(data: Dict[str, Any]):
+    try:
+        result = await get_ai_service().generate_style_preview(data)
+        return success_response(result, "风格试写生成成功")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"生成风格试写失败：{e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/ai/generate-plot")
 async def ai_generate_plot(data: Dict[str, Any]):
     try:
