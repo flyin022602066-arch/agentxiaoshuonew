@@ -43,6 +43,9 @@ class ChapterService:
         )
         return self.db.get_chapter(novel_id, chapter_num)
 
+    def delete_chapter(self, novel_id: str, chapter_num: int) -> bool:
+        return self.db.delete_chapter(novel_id, chapter_num)
+
 
 _chapter_service: ChapterService | None = None
 

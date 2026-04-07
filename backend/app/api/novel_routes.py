@@ -137,6 +137,24 @@ async def update_chapter(novel_id: str, chapter_num: int, chapter_data: Dict[str
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/novels/{novel_id}/chapters/{chapter_num}")
+async def delete_chapter(novel_id: str, chapter_num: int):
+    try:
+        from app.novel_db import get_novel_database
+
+        db = get_novel_database()
+        if not db.get_novel(novel_id):
+            raise HTTPException(status_code=404, detail="小说不存在")
+        if not get_chapter_service().delete_chapter(novel_id, chapter_num):
+            raise HTTPException(status_code=404, detail="章节不存在")
+        return success_response({"chapter_num": chapter_num}, "章节已删除")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除章节失败：{e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/novels/{novel_id}/characters")
 async def list_characters(novel_id: str):
     try:

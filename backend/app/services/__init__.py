@@ -7,6 +7,10 @@ from .agent_service import AgentService, get_agent_service
 from .ai_service import AIService, get_ai_service
 from .auto_service import AutoService, get_auto_service
 from .school_service import SchoolService, get_school_service
+from .chapter_generator import ChapterGenerator
+from .story_memory import StoryMemory
+from .quality_checker import QualityChecker
+from .style_learner import StyleLearner
 
 __all__ = [
     "ConfigService", "get_config_service",
@@ -18,4 +22,8 @@ __all__ = [
     "AIService", "get_ai_service",
     "AutoService", "get_auto_service",
     "SchoolService", "get_school_service",
+    "ChapterGenerator",
+    "StoryMemory",
+    "QualityChecker",
+    "StyleLearner",
 ]

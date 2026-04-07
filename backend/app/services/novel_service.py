@@ -16,13 +16,15 @@ class NovelService:
         title = novel_data.get("title", "")
         if not title:
             raise ValueError("小说标题不能为空")
+        settings = novel_data.get("settings") or {}
         novel_id = self.db.create_novel(
             title=title,
             genre=novel_data.get("genre", "fantasy"),
             description=novel_data.get("description", ""),
             author=novel_data.get("author", "AI Author"),
+            settings=settings,
         )
-        return {"novel_id": novel_id, "title": title}
+        return {"novel_id": novel_id, "title": title, "settings": settings}
 
     def get_novel(self, novel_id: str) -> Dict[str, Any] | None:
         novel = self.db.get_novel(novel_id)

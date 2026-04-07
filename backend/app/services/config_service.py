@@ -12,8 +12,14 @@ logger = logging.getLogger(__name__)
 
 class ConfigService:
     def __init__(self, db_path: str | Path | None = None, legacy_json_path: str | Path | None = None):
-        self.db = ConfigDatabase(str(db_path) if db_path else None)
-        self.legacy_json_path = Path(legacy_json_path) if legacy_json_path else Path(__file__).resolve().parents[2] / "config" / "llm_providers.json"
+        resolved_db_path = str(db_path) if db_path else None
+        self.db = ConfigDatabase() if resolved_db_path is None else ConfigDatabase(resolved_db_path)
+        self._uses_default_db_path = db_path is None
+        self.legacy_json_path = (
+            Path(legacy_json_path)
+            if legacy_json_path is not None
+            else Path(__file__).resolve().parents[2] / "config" / "llm_providers.json"
+        )
         self._migrate_legacy_if_needed()
 
     def _mask_provider(self, provider: Dict[str, Any]) -> Dict[str, Any]:
@@ -22,6 +28,7 @@ class ConfigService:
         data["has_api_key"] = bool(api_key)
         data["masked_api_key"] = f"***{api_key[-4:]}" if api_key else ""
         data["api_key"] = ""
+        data.pop("timeout", None)
         return data
 
     def _normalize_provider(self, name: str, provider: Dict[str, Any], existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -45,7 +52,7 @@ class ConfigService:
             "auth_type": provider.get("auth_type", existing.get("auth_type", "bearer")),
             "auth_header": provider.get("auth_header", existing.get("auth_header")),
             "headers": provider.get("headers", existing.get("headers", {})),
-            "timeout": provider.get("timeout", existing.get("timeout", 60)),
+            "timeout": existing.get("timeout", 60),
             "response_format": provider.get("response_format", existing.get("response_format", "openai")),
             "response_path": provider.get("response_path", existing.get("response_path")),
             "enabled": provider.get("enabled", existing.get("enabled", True)),
@@ -54,6 +61,8 @@ class ConfigService:
         return normalized
 
     def _migrate_legacy_if_needed(self) -> None:
+        if not self._uses_default_db_path and self.legacy_json_path == Path(__file__).resolve().parents[2] / "config" / "llm_providers.json":
+            return
         if self.db.get_all_providers():
             return
         if not self.legacy_json_path.exists():
@@ -145,6 +154,7 @@ class ConfigService:
             for name, incoming in providers.items():
                 existing = self.db.get_provider(name) or {}
                 normalized = self._normalize_provider(name, incoming, existing)
+                # 验证时使用 normalized 后的数据（已恢复真实 api_key）
                 validation = self.validate_provider_payload(name, {
                     **normalized,
                     "has_api_key": bool(normalized.get("api_key")),
@@ -160,8 +170,14 @@ class ConfigService:
                 self._save_project_config(conn, merged_project_config)
             conn.commit()
             return self.get_runtime_config(mask_secrets=True)
-        except Exception:
+        except LLMConfigError:
             conn.rollback()
+            raise
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"保存配置异常：{e}")
+            import traceback
+            traceback.print_exc()
             raise
         finally:
             conn.close()
