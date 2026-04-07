@@ -1,5 +1,9 @@
-# Celery 配置
+# ==========================================
+# 多 Agent 协作小说系统 - Celery App 导出
+# ==========================================
 
-from .celery_app import celery_app
+"""统一导出 Celery app，避免循环导入。"""
 
-__all__ = ['celery_app']
+from app.tasks.agent_tasks import celery_app
+
+__all__ = ["celery_app"]

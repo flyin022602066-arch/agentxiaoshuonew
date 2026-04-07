@@ -6,6 +6,7 @@ from celery import Celery, chain, group
 from datetime import datetime
 from typing import Dict, Any, List
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def agent_execute_task(self, agent_id: str, task: Dict[str, Any]) -> Dict[str, A
         if not agent:
             raise ValueError(f"Agent 未找到：{agent_id}")
         
-        result = agent.execute(task)
+        result = asyncio.run(agent.execute(task))
         
         return {
             "status": "success",
