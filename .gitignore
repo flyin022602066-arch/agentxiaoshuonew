@@ -30,6 +30,7 @@ projects/
 Thumbs.db
 .idea/
 .vscode/
+.worktrees/
 
 # Environment files
 .env
