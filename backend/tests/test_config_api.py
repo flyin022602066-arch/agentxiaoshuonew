@@ -107,3 +107,34 @@ async def test_health_response_never_leaks_plaintext_api_keys(client, tmp_path, 
     body = (await client.get("/api/health")).json()
 
     assert "sk-" not in str(body)
+
+
+@pytest.mark.asyncio
+async def test_check_redis_handles_non_awaitable_close_result(monkeypatch):
+    from app.api import health
+
+    class StubRedisClient:
+        def ping(self):
+            return True
+
+        def close(self):
+            return False
+
+    class StubRedisModule:
+        @staticmethod
+        def from_url(url, socket_timeout=5):
+            return StubRedisClient()
+
+    class StubAppConfig:
+        redis_url = "redis://example.test:6379/0"
+
+    class StubConfig:
+        app_config = StubAppConfig()
+
+    monkeypatch.setattr("redis.asyncio", StubRedisModule(), raising=False)
+    monkeypatch.setattr("app.config.get_config_manager", lambda: StubConfig())
+
+    result = await health.check_redis()
+
+    assert result["status"] == "ok"
+    assert result["url"] == "redis://example.test:6379/0"

@@ -2,11 +2,11 @@
 # 多 Agent 协作小说系统 - 健康检查端点
 # ==========================================
 
-from fastapi import APIRouter, Depends, HTTPException
-from typing import Dict, Any, List
+from fastapi import APIRouter, HTTPException
+from typing import Any, Awaitable, Dict, List, TypeAlias, cast
 from datetime import datetime
+import inspect
 import logging
-import asyncio
 
 from app.services.config_service import get_config_service
 
@@ -23,14 +23,8 @@ class HealthStatus(str):
     DEGRADED = "degraded"
 
 
-class CheckResult(Dict[str, Any]):
-    """单项检查结果"""
-    pass
-
-
-class HealthReport(Dict[str, Any]):
-    """完整健康报告"""
-    pass
+CheckResult: TypeAlias = Dict[str, Any]
+HealthReport: TypeAlias = Dict[str, Any]
 
 
 # ========== 检查函数 ==========
@@ -39,10 +33,9 @@ async def check_database() -> CheckResult:
     """检查 SQLite 数据库"""
     try:
         import aiosqlite
-        from app.config import get_config_manager
-        
-        config = get_config_manager()
-        db_path = config.memory_config.sqlite_path if config.memory_config else "./data/novel.db"
+        from app.novel_db import get_default_novel_db_path
+
+        db_path = str(get_default_novel_db_path())
         
         async with aiosqlite.connect(db_path) as db:
             await db.execute("SELECT 1")
@@ -72,20 +65,30 @@ async def check_redis() -> CheckResult:
         redis_url = config.app_config.redis_url if config.app_config else "redis://localhost:6379/0"
         
         r = redis.from_url(redis_url, socket_timeout=5)
-        await r.ping()
-        await r.close()
+        ping_result = r.ping()
+        if inspect.isawaitable(ping_result):
+            await cast(Awaitable[Any], ping_result)
+        close_result = r.close()
+        if inspect.isawaitable(close_result):
+            await cast(Awaitable[Any], close_result)
         
         return {
             "status": "ok",
             "url": redis_url,
             "message": "Redis 连接正常"
         }
-    except Exception as e:
-        logger.error(f"Redis 检查失败：{e}")
+    except ImportError:
+        logger.warning("redis 依赖未安装，跳过 Redis 检查")
         return {
-            "status": "error",
+            "status": "warning",
+            "message": "redis 依赖未安装，跳过 Redis 检查"
+        }
+    except Exception as e:
+        logger.warning(f"Redis 检查失败：{e}")
+        return {
+            "status": "warning",
             "error": str(e),
-            "message": "Redis 连接失败"
+            "message": "Redis 未启动或不可达（不影响本地核心写作功能）"
         }
 
 
@@ -122,8 +125,6 @@ async def check_llm_providers() -> List[CheckResult]:
     results = []
     
     try:
-        from app.services.config_service import get_config_service
-
         config = get_config_service().get_runtime_config(mask_secrets=True)
         providers = config.get("providers", {})
 
@@ -160,10 +161,16 @@ async def check_celery() -> CheckResult:
     """检查 Celery Worker"""
     try:
         from app.tasks.celery_app import celery_app
+
+        if celery_app is None:
+            return {
+                "status": "warning",
+                "message": "Celery 未配置，跳过 Worker 检查"
+            }
         
         # 尝试获取 Worker 状态
         inspect = celery_app.control.inspect()
-        active_workers = await inspect.active()
+        active_workers = inspect.active()
         
         if active_workers:
             return {
@@ -177,11 +184,11 @@ async def check_celery() -> CheckResult:
                 "message": "未检测到活跃的 Celery Worker"
             }
     except Exception as e:
-        logger.error(f"Celery 检查失败：{e}")
+        logger.warning(f"Celery 检查失败：{e}")
         return {
-            "status": "error",
+            "status": "warning",
             "error": str(e),
-            "message": "Celery 连接失败"
+            "message": "Celery 未启动或当前环境未启用"
         }
 
 
@@ -219,20 +226,27 @@ async def check_memory_usage() -> CheckResult:
     try:
         import psutil
         import os
-        
+
         process = psutil.Process(os.getpid())
         memory_info = process.memory_info()
-        
+
         memory_mb = memory_info.rss / (1024 ** 2)
         memory_percent = process.memory_percent()
-        
+
         status = "ok" if memory_percent < 80 else "warning" if memory_percent < 90 else "error"
-        
+
         return {
             "status": status,
             "memory_mb": round(memory_mb, 2),
             "memory_percent": round(memory_percent, 2),
             "message": f"内存使用 {memory_mb:.2f} MB ({memory_percent:.1f}%)"
+        }
+    except ImportError:
+        # psutil is optional in some environments; skip this check gracefully
+        logger.warning("psutil 未安装，跳过内存检查")
+        return {
+            "status": "warning",
+            "message": "psutil 未安装，跳过内存检查"
         }
     except Exception as e:
         logger.error(f"内存使用检查失败：{e}")
@@ -390,16 +404,23 @@ async def metrics():
     性能指标
     返回 Prometheus 格式的指标数据
     """
-    import psutil
-    import os
-    
-    process = psutil.Process(os.getpid())
-    
-    metrics = {
-        "process_cpu_percent": process.cpu_percent(),
-        "process_memory_mb": process.memory_info().rss / (1024 ** 2),
-        "process_memory_percent": process.memory_percent(),
-        "timestamp": datetime.now().isoformat()
-    }
-    
-    return metrics
+    try:
+        import psutil
+        import os
+        process = psutil.Process(os.getpid())
+        metrics = {
+            "process_cpu_percent": process.cpu_percent(),
+            "process_memory_mb": process.memory_info().rss / (1024 ** 2),
+            "process_memory_percent": process.memory_percent(),
+            "timestamp": datetime.now().isoformat()
+        }
+        return metrics
+    except ImportError:
+        logger.warning("psutil 未安装，metrics 将跳过")
+        return {
+            "process_cpu_percent": None,
+            "process_memory_mb": None,
+            "process_memory_percent": None,
+            "timestamp": datetime.now().isoformat(),
+            "note": "psutil 未安装，无法收集指标"
+        }
