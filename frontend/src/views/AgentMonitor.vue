@@ -46,7 +46,14 @@
             <el-progress :percentage="row.progress" :status="row.status === 'completed' ? 'success' : undefined" />
           </template>
         </el-table-column>
-        <el-table-column prop="current_stage" label="当前阶段" />
+        <el-table-column prop="current_stage" label="当前阶段" min-width="260">
+          <template #default="{ row }">
+            <div class="stage-cell">
+              <div class="stage-title">{{ formatStageTitle(row) }}</div>
+              <div class="stage-desc">{{ formatStageDescription(row) }}</div>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="150">
           <template #default="{ row }">
             <el-button size="small" @click="viewWorkflowDetail(row.workflow_id)">详情</el-button>
@@ -118,7 +125,12 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="进度">{{ currentWorkflow.progress }}%</el-descriptions-item>
-          <el-descriptions-item label="当前阶段">{{ currentWorkflow.current_stage || '无' }}</el-descriptions-item>
+          <el-descriptions-item label="当前阶段">
+            <div class="stage-detail">
+              <div class="stage-title">{{ formatStageTitle(currentWorkflow) }}</div>
+              <div class="stage-desc">{{ formatStageDescription(currentWorkflow) }}</div>
+            </div>
+          </el-descriptions-item>
         </el-descriptions>
         
         <el-divider />
@@ -211,6 +223,49 @@ const workflowStatusTypes = {
   'failed': 'danger'
 }
 
+const stageDescriptionMap = {
+  auto_creation: [
+    { match: ['开始创建蓝图'], title: '全自动创作：初始化蓝图', description: '系统正在创建世界观、主线结构与章节规划，为整本小说建立统一创作骨架。' },
+    { match: ['世界观'], title: '全自动创作：构建世界观', description: '正在整理时代背景、规则体系与核心冲突，确保后续剧情有稳定的世界设定支撑。' },
+    { match: ['蓝图', '规划'], title: '全自动创作：规划主线', description: '正在拆解主线节奏、阶段目标与关键转折点，形成可持续推进的长篇蓝图。' },
+    { match: ['人物'], title: '全自动创作：生成人物设定', description: '正在补充角色定位、关系网络与成长路线，让主要人物具备持续发展的动机与张力。' },
+    { match: ['伏笔'], title: '全自动创作：埋设伏笔', description: '正在安排前期线索与后续回收点，增强故事连贯性与阅读期待感。' },
+    { match: ['第一章'], title: '全自动创作：生成首章', description: '正在根据蓝图完成第一章落地写作，输出可直接继续续写的开篇内容。' },
+    { match: ['完成'], title: '全自动创作：已完成', description: '蓝图与首章已生成完成，可以进入写作面板继续扩写后续章节。' },
+    { match: ['失败'], title: '全自动创作：执行失败', description: '自动创作流程中断，请结合错误信息和日志定位具体失败阶段。' }
+  ],
+  chapter_creation: [
+    { match: ['开始创作'], title: '章节续写：准备生成', description: '系统正在整理当前章节大纲、上下文与风格要求，准备开始本章续写。' },
+    { match: ['细化大纲'], title: '章节续写：细化大纲', description: '正在把章节目标拆成更细的场景与冲突节点，确保后续正文推进更稳定。' },
+    { match: ['准备角色'], title: '章节续写：准备角色', description: '正在确认本章出场角色、关系状态与行为动机，避免人物表现失真。' },
+    { match: ['撰写初稿'], title: '章节续写：生成初稿', description: '正在根据既有设定与章节目标撰写正文初稿，形成本章主要内容。' },
+    { match: ['打磨对话'], title: '章节续写：润色对话', description: '正在优化角色对白与互动节奏，让对话更符合人物身份与场景情绪。' },
+    { match: ['一致性检查'], title: '章节续写：一致性校验', description: '正在核对设定、剧情逻辑与上下文连续性，减少前后矛盾和信息遗漏。' },
+    { match: ['最终审核'], title: '章节续写：最终审核', description: '正在做收尾审校与质量把关，确保本章可直接保存进入下一步创作。' },
+    { match: ['创作完成', '完成'], title: '章节续写：已完成', description: '本章内容已生成并通过流程审核，可以保存结果或继续下一章节。' },
+    { match: ['创作失败', '失败'], title: '章节续写：执行失败', description: '章节续写流程中断，请查看任务错误信息并结合日志继续排查。' }
+  ]
+}
+
+const getStageMeta = (workflow) => {
+  const taskType = workflow?.task_type || 'chapter_creation'
+  const stage = workflow?.current_stage || ''
+  const candidates = stageDescriptionMap[taskType] || stageDescriptionMap.chapter_creation
+  const matched = candidates.find(item => item.match.some(keyword => stage.includes(keyword)))
+
+  if (matched) {
+    return matched
+  }
+
+  return {
+    title: stage || '暂无阶段信息',
+    description: stage ? '该阶段暂无预设说明，建议结合任务进度与日志一起判断执行状态。' : '任务暂未开始或后端尚未返回阶段信息。'
+  }
+}
+
+const formatStageTitle = (workflow) => getStageMeta(workflow).title
+const formatStageDescription = (workflow) => getStageMeta(workflow).description
+
 const loadAgentStatus = async () => {
   try {
     const result = await apiClient.agents.getStatus()
@@ -227,9 +282,29 @@ const loadAgentStatus = async () => {
 }
 
 const loadWorkflows = async () => {
-  // 实际应该从 API 获取工作流列表
-  // 暂时返回空数组
-  workflows.value = []
+  try {
+    const result = await apiClient.agents.listTasks({ limit: 20 })
+    const tasks = result.data?.tasks || []
+
+    workflows.value = tasks
+      .filter(task => ['chapter_creation', 'auto_creation'].includes(task.task_type))
+      .map(task => ({
+        workflow_id: task.task_id,
+        task_id: task.task_id,
+        task_type: task.task_type,
+        chapter_num: task.metadata?.chapter_num || '-',
+        status: task.status,
+        progress: task.progress || 0,
+        current_stage: task.current_stage || '',
+        created_at: task.created_at,
+        updated_at: task.updated_at,
+        result: task.result,
+        error: task.error,
+        metadata: task.metadata || {}
+      }))
+  } catch (error) {
+    workflows.value = []
+  }
 }
 
 const loadSystemStats = async () => {
@@ -254,7 +329,10 @@ const loadSystemStats = async () => {
 const viewWorkflowDetail = async (workflowId) => {
   try {
     const result = await apiClient.agents.getTaskStatus(workflowId)
-    currentWorkflow.value = result.data
+    currentWorkflow.value = {
+      ...result.data,
+      workflow_id: result.data?.workflow_id || result.data?.task_id || workflowId
+    }
     workflowDetailVisible.value = true
   } catch (error) {
     ElMessage.error('获取工作流详情失败：' + error.message)
@@ -309,8 +387,8 @@ onMounted(() => {
 
 <style scoped>
 .agent-monitor {
-  max-width: 1400px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
 }
 
 .agent-card {
@@ -326,6 +404,25 @@ onMounted(() => {
 
 .agent-card.status-working {
   border-left: 4px solid #e6a23c;
+}
+
+.stage-cell,
+.stage-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stage-title {
+  color: #303133;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.stage-desc {
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .agent-card.status-idle {
