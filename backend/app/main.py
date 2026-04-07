@@ -23,9 +23,14 @@ from app.api import router as api_router
 from app.api.responses import install_exception_handlers
 from app.api import ws_routes
 
+# 修复 Windows 终端中文乱码
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # 配置日志
 # 确保日志目录存在
-from pathlib import Path
 log_dir = Path('./logs')
 log_dir.mkdir(parents=True, exist_ok=True)
 

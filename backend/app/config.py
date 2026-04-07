@@ -16,6 +16,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_NOVEL_DB_PATH = str(Path(__file__).resolve().parents[1] / "data" / "novels.db")
+
+
 # ========== 配置模型定义 ==========
 
 class LLMProviderConfig(BaseModel):
@@ -54,7 +57,7 @@ class MemoryConfig(BaseModel):
     vector_db_path: str = Field(default="./data/vector_db", description="向量数据库路径")
     vector_db_type: str = Field(default="chroma", description="向量数据库类型：chroma/faiss")
     graph_db_type: str = Field(default="networkx", description="图谱数据库类型：networkx/neo4j")
-    sqlite_path: str = Field(default="./data/novel.db", description="SQLite 数据库路径")
+    sqlite_path: str = Field(default=DEFAULT_NOVEL_DB_PATH, description="SQLite 数据库路径")
     short_term_window: int = Field(default=10, description="短期记忆窗口大小（章节数）")
     embedding_model: str = Field(default="text-embedding-ada-002", description="嵌入模型")
     max_retrieve_results: int = Field(default=10, description="最大检索结果数")
@@ -142,7 +145,7 @@ class AppConfig(BaseSettings):
     # 记忆配置
     vector_db_path: str = Field(default="./data/vector_db")
     graph_db_type: str = Field(default="networkx")
-    sqlite_path: str = Field(default="./data/novel.db")
+    sqlite_path: str = Field(default=DEFAULT_NOVEL_DB_PATH)
     
     # 安全配置
     encrypt_api_keys: bool = Field(default=True)
@@ -241,7 +244,7 @@ class ConfigManager:
         return MemoryConfig(
             vector_db_path=self.app_config.vector_db_path if self.app_config else "./data/vector_db",
             graph_db_type=self.app_config.graph_db_type if self.app_config else "networkx",
-            sqlite_path=self.app_config.sqlite_path if self.app_config else "./data/novel.db"
+            sqlite_path=self.app_config.sqlite_path if self.app_config else DEFAULT_NOVEL_DB_PATH
         )
     
     def _load_security_config(self) -> SecurityConfig:

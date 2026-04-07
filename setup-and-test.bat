@@ -1,6 +1,9 @@
 @echo off
 chcp 65001 >nul
 setlocal
+set PYTHONIOENCODING=utf-8
+set PYTHONUTF8=1
+set NPM_CONFIG_UNICODE=true
 
 REM ==========================================
 REM Multi-Agent Novel System - Setup, Test and Start
@@ -48,11 +51,11 @@ echo [OK] Smoke tests passed
 
 echo.
 echo [4/5] Starting backend server...
-start "Novel Backend" cmd /k "cd /d "%~dp0backend" && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+start "Novel Backend" cmd /k "chcp 65001>nul && set PYTHONIOENCODING=utf-8 && set PYTHONUTF8=1 && cd /d "%~dp0backend" && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
 echo.
 echo [5/5] Starting frontend server...
-start "Novel Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev -- --host 0.0.0.0 --port 5173"
+start "Novel Frontend" cmd /k "chcp 65001>nul && set NPM_CONFIG_UNICODE=true && cd /d "%~dp0frontend" && npm run dev -- --host 0.0.0.0 --port 5173"
 
 echo.
 echo ================================================================
