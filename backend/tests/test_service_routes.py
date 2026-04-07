@@ -23,7 +23,7 @@ async def test_writing_routes_delegate_to_writing_service(client, monkeypatch):
     from app.api import writing_routes
 
     class StubWritingService:
-        async def create_chapter_workflow(self, chapter_data):
+        async def create_chapter_workflow(self, chapter_data, task_id=None):
             return {
                 "status": "success",
                 "workflow_id": "wf-1",
@@ -41,7 +41,8 @@ async def test_writing_routes_delegate_to_writing_service(client, monkeypatch):
 
     assert response.status_code == 200
     assert body["status"] == "success"
-    assert body["data"]["workflow_id"] == "wf-1"
+    assert body["data"]["status"] == "pending"
+    assert body["data"]["task_id"]
 
 
 @pytest.mark.asyncio

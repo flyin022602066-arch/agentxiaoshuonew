@@ -39,6 +39,20 @@ def test_save_chapter_updates_existing_record_instead_of_creating_file_copy(tmp_
     assert chapter["content"] == "新内容"
 
 
+def test_delete_chapter_removes_record_and_updates_stats(tmp_path):
+    service = ChapterService(db_path=tmp_path / "novels.db")
+    novel_id = service.create_novel("测试小说")
+    service.save_chapter(novel_id=novel_id, chapter_num=1, title="第一章", content="正文一")
+    service.save_chapter(novel_id=novel_id, chapter_num=2, title="第二章", content="正文二")
+
+    deleted = service.delete_chapter(novel_id, 1)
+    remaining = service.list_chapters(novel_id)
+
+    assert deleted is True
+    assert [chapter["chapter_num"] for chapter in remaining] == [2]
+    assert service.db.get_novel_stats(novel_id)["total_chapters"] == 1
+
+
 @pytest.mark.asyncio
 async def test_writing_endpoints_share_same_database_source(client, tmp_path, monkeypatch):
     from app.api import novel_routes, writing_routes
@@ -105,3 +119,24 @@ async def test_writing_get_endpoint_reads_same_chapter_data_as_novel_endpoint(cl
 
     assert novel_response.json()["data"]["content"] == writing_response.json()["data"]["content"]
     assert novel_response.json()["data"]["title"] == writing_response.json()["data"]["title"]
+
+
+@pytest.mark.asyncio
+async def test_delete_chapter_endpoint_returns_success(client, tmp_path, monkeypatch):
+    from app.api import novel_routes
+    from app import novel_db
+    from app.services.chapter_service import ChapterService
+
+    service = ChapterService(db_path=tmp_path / "novels.db")
+    novel_id = service.create_novel("删除接口测试")
+    service.save_chapter(novel_id=novel_id, chapter_num=1, title="第一章", content="待删除")
+
+    monkeypatch.setattr(novel_routes, "get_chapter_service", lambda: service)
+    monkeypatch.setattr(novel_db, "get_novel_database", lambda: service.db)
+
+    response = await client.delete(f"/api/novels/{novel_id}/chapters/1")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["success"] is True
+    assert service.get_chapter(novel_id, 1) is None

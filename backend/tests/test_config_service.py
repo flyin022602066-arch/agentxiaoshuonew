@@ -43,6 +43,7 @@ def test_get_active_provider_returns_db_backed_runtime_provider(tmp_path):
 
     provider = service.get_active_provider_config()
 
+    assert provider is not None
     assert provider["name"] == "eggfans"
     assert provider["api_key"] == "sk-live-value"
     assert provider["model"] == "deepseek-v3"
@@ -76,6 +77,7 @@ def test_save_runtime_config_keeps_existing_key_when_api_key_is_blank(tmp_path):
     )
 
     provider = service.get_active_provider_config()
+    assert provider is not None
     assert provider["api_key"] == "sk-existing-9999"
     assert provider["base_url"] == "https://example.com/v2"
     assert provider["model"] == "m2"
@@ -103,8 +105,16 @@ def test_service_migrates_legacy_json_when_database_is_empty(tmp_path):
     service = ConfigService(db_path=tmp_path / "config.db", legacy_json_path=legacy_json)
     provider = service.get_active_provider_config()
 
+    assert provider is not None
     assert provider["api_key"] == "sk-legacy"
     assert service.get_runtime_config(mask_secrets=True)["default_provider"] == "eggfans"
+
+
+def test_custom_db_path_does_not_auto_migrate_default_legacy_config(tmp_path):
+    service = ConfigService(db_path=tmp_path / "config.db")
+
+    assert service.get_active_provider_config() is None
+    assert service.get_runtime_config(mask_secrets=False)["providers"] == {}
 
 
 def test_save_runtime_config_can_explicitly_clear_api_key(tmp_path):
@@ -135,6 +145,7 @@ def test_save_runtime_config_can_explicitly_clear_api_key(tmp_path):
     )
 
     provider = service.get_provider_config("eggfans", mask_secrets=False)
+    assert provider is not None
     assert provider["api_key"] == ""
 
 
@@ -169,9 +180,10 @@ def test_save_runtime_config_rolls_back_on_partial_failure(tmp_path, monkeypatch
                 }
             },
             project_config={"project_name": "New", "project_path": "./projects/new"},
-        )
+    )
 
     provider = service.get_active_provider_config()
+    assert provider is not None
     assert provider["api_key"] == "sk-old"
     assert provider["base_url"] == "https://old.example.com"
 
