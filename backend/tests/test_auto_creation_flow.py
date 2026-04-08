@@ -131,3 +131,55 @@ async def test_auto_service_passes_style_and_chapter_count_to_creation_system(mo
         "auto_style": {"style_id": "wuxia_jinyong", "strength": "strong"},
     }
     assert updates[0]["task_id"] == "auto_1"
+
+
+@pytest.mark.asyncio
+async def test_auto_creation_first_chapter_allows_lower_style_score(monkeypatch, tmp_path):
+    from app.novel_architect import AutoCreationSystem
+    from app.novel_db import NovelDatabase
+
+    db = NovelDatabase(str(tmp_path / "novels.db"))
+    monkeypatch.setattr("app.novel_db.get_novel_database", lambda: db)
+
+    captured = {}
+
+    class StubExecutor:
+        async def execute_chapter_workflow(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "status": "success",
+                "workflow_id": "wf_test",
+                "content": "这是通过自动创作首章验证的正文。" * 80,
+                "word_count": 2200,
+                "outline_summary": "主角登场并触发初始冲突",
+                "style_feedback": {
+                    "style_id": "default",
+                    "score": 43,
+                    "matched_features": ["叙事清晰"],
+                    "missing_features": ["风格稳定", "语感强化"],
+                    "summary": "风格命中偏弱但仍可作为首章基线。",
+                },
+            }
+
+    monkeypatch.setattr("app.workflow_executor.get_workflow_executor", lambda: StubExecutor())
+
+    system = AutoCreationSystem(llm_client={"api_key": "k", "base_url": "https://example.com", "model": "demo"})
+    blueprint = {
+        "novel_info": {"title": "测试自动创作", "genre": "玄幻", "description": "简介"},
+        "world_map": {"world_name": "测试世界", "power_system": {"name": "灵力体系"}},
+        "character_system": {
+            "protagonist": {"name": "林川", "goal": "活下去", "background": "山村少年"}
+        },
+        "macro_plot": {"total_chapters": 3000},
+        "hook_network": {},
+    }
+
+    result = await system._generate_first_chapter(
+        novel_id="novel_test",
+        blueprint=blueprint,
+        auto_style={"style_id": "default", "strength": "medium"},
+    )
+
+    assert result["status"] == "success"
+    assert result["style_feedback"]["score"] == 43
+    assert captured["min_style_score"] == 40

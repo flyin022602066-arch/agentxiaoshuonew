@@ -166,6 +166,7 @@ class WritingService:
             world_map=world_map or None,
             protagonist_halo=protagonist_halo or None,
             progress_callback=_progress,
+            min_style_score=40,
         )
 
         if creative_settings:

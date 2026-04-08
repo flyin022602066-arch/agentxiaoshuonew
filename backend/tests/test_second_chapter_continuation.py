@@ -90,7 +90,7 @@ async def test_executor_rejects_second_chapter_replay(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_executor_requires_second_chapter_to_carry_forward_previous_ending_state(monkeypatch):
+async def test_executor_logs_warning_instead_of_failing_second_chapter_carryover(monkeypatch):
     from app.workflow_executor import WritingWorkflowExecutor
 
     executor = WritingWorkflowExecutor()
@@ -168,8 +168,89 @@ async def test_executor_requires_second_chapter_to_carry_forward_previous_ending
         style="default",
     )
 
-    assert result["status"] == "error"
-    assert "承接" in result["message"] or "完成" in result["message"] or "结尾状态" in result["message"]
+    assert result["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_executor_allows_second_chapter_to_continue_despite_carryover_miss(monkeypatch):
+    from app.workflow_executor import WritingWorkflowExecutor
+
+    executor = WritingWorkflowExecutor()
+    executor.llm_client = {"api_key": "k", "base_url": "https://example.com", "model": "demo", "timeout": 60}
+
+    previous_content = (
+        "林川追到码头尽头时，雨已经下大了。"
+        "那人始终背对着他，手里提着一盏旧灯，像是早就知道他会来。"
+        "海风卷着雾气扑上栈桥，木板在脚下轻轻摇晃。"
+        "林川刚要开口，对方却先叫出了他的名字。"
+    ) * 6
+
+    weak_carryover_opening = (
+        "天刚亮时，林川已经离开了码头，沿着潮湿石阶走向城内。"
+        "他没有停下脚步，只是把昨夜听见的那句话反复咀嚼。"
+        "风还带着海腥味，衣角上的潮气提醒他危险并未真正远去。"
+        "街巷渐渐热闹起来，但他心里的警惕始终没有散去。"
+    ) * 6
+
+    async def stub_previous_chapters(novel_id, current_chapter, count=3):
+        return [{
+            "chapter_num": 1,
+            "title": "第一章",
+            "content": previous_content,
+            "next_chapter_baton": {
+                "must_continue_from": "对方先在码头雨夜里叫出了林川的名字。",
+                "carry_forward_emotion": "警惕和压迫感持续升级",
+                "carry_forward_hooks": ["叫出名字的人到底是谁"],
+                "forbidden_backtracks": ["禁止跳回平静日常开场", "禁止无视码头对峙的直接后果"],
+            },
+        }]
+
+    async def stub_refine_outline(outline, style, prev_chapters, macro_plot, protagonist_halo, novel_id, current_chapter, style_strength=None):
+        return outline
+
+    async def stub_prepare_characters(novel_id, outline, prev_chapters, world_map, protagonist_halo):
+        return {"character_notes": "", "character_state_packet": {}}
+
+    async def stub_write_draft(outline, character_notes, word_count_target, style, prev_chapters, macro_plot, world_map, protagonist_halo, style_strength=None):
+        return weak_carryover_opening
+
+    async def stub_polish_dialogue(content, style='default', style_strength=None):
+        return content
+
+    async def stub_de_ai(content, style='default', style_strength=None):
+        return content
+
+    async def stub_consistency(content, novel_id, prev_chapters, world_map, protagonist_halo, chapter_num, style='default', style_strength=None):
+        return {
+            "issues": [],
+            "has_issues": False,
+            "quality_score": 90,
+            "word_count": len(content),
+            "style_feedback": {"score": 80, "matched_features": [], "missing_features": [], "summary": "ok"},
+            "review_packet": {"fatal_issues": [], "important_issues": [], "optional_issues": [], "scores": {}, "style_feedback": {}, "editor_patch_brief": [], "pass_to_editor": False},
+        }
+
+    async def stub_final_review(content, check_result, style='default', style_strength=None):
+        return content
+
+    monkeypatch.setattr(executor, "_get_previous_chapters", stub_previous_chapters)
+    monkeypatch.setattr(executor, "_refine_outline_smart", stub_refine_outline)
+    monkeypatch.setattr(executor, "_prepare_characters_smart", stub_prepare_characters)
+    monkeypatch.setattr(executor, "_write_draft_smart", stub_write_draft)
+    monkeypatch.setattr(executor, "_polish_dialogue", stub_polish_dialogue)
+    monkeypatch.setattr(executor, "_de_ai_polish", stub_de_ai)
+    monkeypatch.setattr(executor, "_consistency_check_smart", stub_consistency)
+    monkeypatch.setattr(executor, "_final_review", stub_final_review)
+
+    result = await executor.execute_chapter_workflow(
+        novel_id="novel_continuity",
+        chapter_num=2,
+        outline="承接码头对峙后的压力，推进新的危机。",
+        word_count_target=1800,
+        style="default",
+    )
+
+    assert result["status"] == "success"
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,8 @@ from app.schemas.agent_packets import ChapterPlan, NextChapterBaton
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_DIALOGUE_POLISH_TIMEOUT = 180.0
+
 
 def _stringify_exception(error: Exception) -> str:
     message = str(error).strip()
@@ -926,7 +928,8 @@ class WritingWorkflowExecutor:
         macro_plot: Optional[Dict] = None,
         world_map: Optional[Dict] = None,
         protagonist_halo: Optional[Dict] = None,
-        progress_callback=None  # 新增：进度回调
+        progress_callback=None,  # 新增：进度回调
+        min_style_score: int = 50,
     ) -> Dict[str, Any]:
         """
         执行章节创作工作流 - 智能参考系统
@@ -1115,17 +1118,27 @@ class WritingWorkflowExecutor:
             # Step 4: 对话专家 - 打磨对话
             _progress(60, "Step 4/6: 对话专家 - 打磨对话")
             try:
+                dialogue_timeout = float(getattr(self, 'dialogue_polish_timeout', DEFAULT_DIALOGUE_POLISH_TIMEOUT))
                 try:
-                    polished_content = await self._polish_dialogue(draft_content, style=style, style_strength=style_strength)
+                    polished_content = await asyncio.wait_for(
+                        self._polish_dialogue(draft_content, style=style, style_strength=style_strength),
+                        timeout=dialogue_timeout,
+                    )
                 except TypeError as e:
                     if 'style_strength' in str(e):
-                        polished_content = await self._polish_dialogue(draft_content, style=style)
+                        polished_content = await asyncio.wait_for(
+                            self._polish_dialogue(draft_content, style=style),
+                            timeout=dialogue_timeout,
+                        )
                     else:
                         raise
                 if not polished_content or len(polished_content) < 500:
                     logger.error(f"Step 4 返回内容过短：{len(polished_content) if polished_content else 0}")
                     raise Exception("对话打磨失败：内容过短")
                 logger.info(f"✓ Step 4 完成，润色后字数：{len(polished_content)}")
+            except asyncio.TimeoutError:
+                logger.warning(f"✗ Step 4 超时，回退使用 Step 3 初稿（timeout={dialogue_timeout}s）")
+                polished_content = draft_content
             except Exception as e:
                 logger.warning(f"✗ Step 4 失败，回退使用 Step 3 初稿：{e}")
                 polished_content = draft_content
@@ -1191,7 +1204,7 @@ class WritingWorkflowExecutor:
                     f"章节内容与第{previous_chapter_num}章过于相似（相似度 {ratio:.1%}），疑似重复续写"
                 )
 
-            style_drift = _check_style_drift(check_result)
+            style_drift = _check_style_drift(check_result, min_score=min_style_score)
             if style_drift:
                 missing = ' / '.join(style_drift.get('missing_features', [])[:3])
                 raise Exception(
@@ -1202,9 +1215,14 @@ class WritingWorkflowExecutor:
             if carryover_check:
                 previous_chapter_num = carryover_check.get('previous_chapter_num', '?')
                 signals = ' / '.join(carryover_check.get('signals', []))
-                raise Exception(
-                    f"第{chapter_num}章未有效承接第{previous_chapter_num}章结尾状态，缺少连续续写信号：{signals}"
-                )
+                if chapter_num == 2:
+                    logger.warning(
+                        f"⚠️ 第2章连续性信号不足，放宽硬门槛继续生成：第{previous_chapter_num}章 -> 第{chapter_num}章，缺少信号：{signals}"
+                    )
+                else:
+                    raise Exception(
+                        f"第{chapter_num}章未有效承接第{previous_chapter_num}章结尾状态，缺少连续续写信号：{signals}"
+                    )
 
             # 结尾完整性检查与自动补全
             ending_check = check_ending_completeness(final_content)

@@ -74,3 +74,55 @@ async def test_dialogue_polish_splits_long_content_into_segments(monkeypatch):
     # max_tokens should be reasonable for Chinese text (not capped at 1800 anymore)
     assert all(call["max_tokens"] <= 4000 for call in calls)
     assert all(call["max_tokens"] >= 900 for call in calls)
+
+
+@pytest.mark.asyncio
+async def test_workflow_falls_back_to_draft_when_dialogue_polish_times_out(monkeypatch):
+    from app.workflow_executor import WritingWorkflowExecutor
+
+    executor = WritingWorkflowExecutor()
+    executor.llm_client = {"api_key": "k", "base_url": "https://example.com", "model": "demo", "timeout": 60, "endpoint": "/v1/chat/completions"}
+
+    async def stub_prev_chapters(novel_id, chapter_num):
+        return []
+
+    async def stub_refine(*args, **kwargs):
+        return "细化大纲"
+
+    async def stub_prepare(*args, **kwargs):
+        return "角色设定"
+
+    async def stub_write(*args, **kwargs):
+        return "正文内容" * 400
+
+    async def stub_polish(*args, **kwargs):
+        import asyncio
+        await asyncio.sleep(0.05)
+        return "不会返回"
+
+    async def stub_check(content, *args, **kwargs):
+        return {"issues": [], "has_issues": False, "quality_score": 82, "word_count": len(content), "style_feedback": {"score": 80, "matched_features": [], "missing_features": [], "summary": "ok"}, "review_packet": {"fatal_issues": [], "important_issues": [], "optional_issues": [], "scores": {}, "style_feedback": {}, "editor_patch_brief": [], "pass_to_editor": False}}
+
+    async def stub_final(content, check_result, *args, **kwargs):
+        return content
+
+    monkeypatch.setattr(executor, "_get_previous_chapters", stub_prev_chapters)
+    monkeypatch.setattr(executor, "_refine_outline_smart", stub_refine)
+    monkeypatch.setattr(executor, "_prepare_characters_smart", stub_prepare)
+    monkeypatch.setattr(executor, "_write_draft_smart", stub_write)
+    monkeypatch.setattr(executor, "_polish_dialogue", stub_polish)
+    monkeypatch.setattr(executor, "_consistency_check_smart", stub_check)
+    monkeypatch.setattr(executor, "_final_review", stub_final)
+    monkeypatch.setattr(executor, "dialogue_polish_timeout", 0.01, raising=False)
+
+    result = await executor.execute_chapter_workflow(
+        novel_id="novel_x",
+        chapter_num=1,
+        outline="测试大纲",
+        word_count_target=2200,
+        style="default",
+    )
+
+    assert result["status"] == "success"
+    assert result["content"].startswith("正文内容")
+    assert result["word_count"] >= 1000

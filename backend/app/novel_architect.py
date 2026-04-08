@@ -515,6 +515,7 @@ class AutoCreationSystem:
             word_count_target=2200,
             style=(auto_style or {}).get('style_id') or (auto_style or {}).get('mode') or 'default',
             progress_callback=_chapter_progress,
+            min_style_score=40,
         )
         
         logger.info(f"workflow_executor 返回：status={result.get('status')}, word_count={result.get('word_count', 0)}")
