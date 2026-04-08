@@ -56,7 +56,7 @@
             <el-button type="primary" size="small" @click="startWriting" :loading="writing">
               {{ writing ? '创作中...' : 'AI 创作本章' }}
             </el-button>
-            <el-button type="success" size="small" @click="continueWriting" :loading="writing">
+            <el-button type="success" size="small" @click="continueWriting" :loading="writing" :disabled="cannotContinueToNextChapter">
               {{ writing ? '创作中...' : '续写下一章' }}
             </el-button>
           </div>
@@ -739,6 +739,7 @@ const filteredChapters = computed(() => {
 
 const currentWordCount = computed(() => chapterContent.value.length)
 const canExportCurrentChapter = computed(() => Boolean(selectedNovelId.value && currentChapterNum.value))
+const cannotContinueToNextChapter = computed(() => Boolean(selectedNovelId.value && currentChapterNum.value && !chapterContent.value.trim()))
 
 const totalChapters = computed(() => chapters.value.length)
 
@@ -1465,6 +1466,11 @@ const startWriting = async (options = {}) => {
 
 const continueWriting = async () => {
   // 自动创建下一章并自动生成大纲后直接开始创作
+  if (cannotContinueToNextChapter.value) {
+    ElMessage.warning('请先完成当前章节内容，再续写下一章')
+    return
+  }
+
   creatingNextChapter.value = true
   try {
     const previousChapterNum = currentChapterNum.value

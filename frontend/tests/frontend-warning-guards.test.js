@@ -23,5 +23,12 @@ test('NovelLibrary checkbox does not use array v-model on single el-checkbox', (
 test('WritingPanel defines handleProgressClose when dialog close handler is used', () => {
   const content = readView('WritingPanel.vue')
   assert.ok(content.includes('@close="handleProgressClose"'))
-  assert.match(content, /const\s+handleProgressClose\s*=\s*\(/)
+  assert.ok(content.includes('const handleProgressClose = ('))
+})
+
+test('WritingPanel blocks continuing when current chapter content is empty', () => {
+  const content = readView('WritingPanel.vue')
+  assert.ok(content.includes(':disabled="cannotContinueToNextChapter"'))
+  assert.ok(content.includes('const cannotContinueToNextChapter = computed('))
+  assert.match(content, /ElMessage\.warning\(['"]请先完成当前章节内容，再续写下一章['"]\)/)
 })
